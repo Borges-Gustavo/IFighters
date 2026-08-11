@@ -1,0 +1,24 @@
+{
+  "name": "ifighters",
+  "version": "1.0.0",
+  "description": "Protótipo estático de batalhas por turnos entre IFighters, com telas baseadas nas referências visuais do projeto.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Borges-Gustavo/IFighters.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Borges-Gustavo/IFighters/issues"
+  },
+  "homepage": "https://github.com/Borges-Gustavo/IFighters#readme",
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}
