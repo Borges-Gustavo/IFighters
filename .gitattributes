@@ -1,2 +1,22 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Mantém arquivos de texto em LF em qualquer sistema operacional.
+* text=auto eol=lf
+
+# Declara explicitamente os formatos de texto do projeto.
+*.css text eol=lf
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Evita conversões e comparações textuais em arquivos binários.
+*.avif binary
+*.gif binary
+*.ico binary
+*.jpeg binary
+*.jpg binary
+*.mp4 binary
+*.png binary
+*.webm binary
+*.webp binary
+*.woff binary
+*.woff2 binary

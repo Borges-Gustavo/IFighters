@@ -1,19 +1,30 @@
 {
   "name": "ifighters",
   "version": "1.0.0",
-  "description": "Protótipo estático de batalhas por turnos entre IFighters, com telas baseadas nas referências visuais do projeto.",
-  "main": "app.js",
+  "description": "Jogo web de batalhas por turnos entre IFighters, com modo local e multiplayer em tempo real.",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "verificar": "node --check app.js && node --check data.js && node --check protocol.js && node --check regras-batalha.js && node --check server.js",
+    "test": "npm run verificar && node --test"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Borges-Gustavo/IFighters.git"
   },
-  "keywords": [],
+  "keywords": [
+    "jogo",
+    "batalha",
+    "multiplayer",
+    "websocket"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
     "url": "https://github.com/Borges-Gustavo/IFighters/issues"
   },

@@ -1,1 +1,22 @@
-const EVENTS=Object.freeze({CREATE:'create_room',CREATED:'room_created',JOIN:'join_room',JOINED:'room_joined',ERROR:'room_error',SELECT:'player_ready',START:'battle_started',ACTION:'choose_action',ACCEPTED:'action_accepted',TURN:'turn_result',FINISH:'battle_finished',DISCONNECT:'opponent_disconnected',REMATCH:'request_rematch',REMATCH_STATUS:'rematch_status',LEAVE:'leave_room',STATE:'battle_state'});if(typeof module!=='undefined')module.exports=EVENTS;
+const EVENTOS = Object.freeze({
+  CONEXAO: "conexao",
+  CRIAR_SALA: "criar_sala",
+  SALA_CRIADA: "sala_criada",
+  ENTRAR_SALA: "entrar_sala",
+  SALA_ENTRADA: "sala_entrada",
+  ERRO_SALA: "erro_sala",
+  SELECIONAR_LUTADOR: "selecionar_lutador",
+  BATALHA_INICIADA: "batalha_iniciada",
+  ESCOLHER_GOLPE: "escolher_golpe",
+  ACAO_ACEITA: "acao_aceita",
+  RESULTADO_TURNO: "resultado_turno",
+  BATALHA_ENCERRADA: "batalha_encerrada",
+  OPONENTE_DESCONECTADO: "oponente_desconectado",
+  SOLICITAR_REVANCHE: "solicitar_revanche",
+  STATUS_REVANCHE: "status_revanche",
+  SAIR_SALA: "sair_sala",
+});
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = EVENTOS;
+}

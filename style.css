@@ -1,1 +1,1247 @@
-:root{--green:#19bb17;--orange:#f89400;--white:#fff;--black:#000}*{box-sizing:border-box}body{margin:0;background:#080405;color:#fff;font-family:"Courier New",monospace;overflow:hidden}button{font:inherit;cursor:pointer}.screen{display:none;position:relative;width:100vw;min-height:100vh;overflow:hidden}.screen.active{display:block;animation:screen-in .18s steps(3)}@keyframes screen-in{from{opacity:0}to{opacity:1}}.campus,.opening,.battle{background:#050304 url('img/game/Fundo .png') center/cover no-repeat}.campus:before,.opening:before{content:'';position:absolute;inset:0;background:#0001;pointer-events:none}.intro{background:#000;display:none!important;place-items:center}.intro.active{display:grid!important}.intro video{width:min(100vw,177.78vh);height:min(100vh,56.25vw);object-fit:contain;background:#000}.pixel-button,.back,.confirm{background:#000;color:var(--green);border:4px solid #fff;padding:10px 15px;font-weight:bold;text-transform:uppercase}.intro .pixel-button{position:absolute;z-index:2;font-size:clamp(16px,2vw,28px)}#intro-help{position:absolute;bottom:4%;z-index:2;color:#fff;text-shadow:2px 2px #000}.intro.playing .pixel-button,.intro.playing #intro-help{display:none}.opening-logo{position:absolute;z-index:1;left:2.2%;top:15%;width:35vw;max-width:540px}.demo{position:absolute;left:23%;top:38%;font-size:clamp(36px,7vw,100px);letter-spacing:.15em;color:var(--orange)}.opening-fighter{position:absolute;right:7%;bottom:-2%;height:76vh;max-width:42vw;object-fit:contain;image-rendering:pixelated}.start-button{position:absolute;bottom:3%;left:50%;transform:translateX(-50%);border:0;background:transparent;color:var(--green);font-size:clamp(18px,2vw,32px);text-shadow:2px 2px #000;animation:blink 1s steps(2) infinite}@keyframes blink{50%{opacity:.3}}.corner-logo{position:absolute;z-index:2;top:6%;left:3%;width:29vw;max-width:410px}.reference-panel{background:#000;border:15px solid #fff;color:#fff}.menu-panel,.play-panel{position:absolute;z-index:2;left:calc(50% - 20vw);top:42%;width:40vw;min-width:420px;padding:42px 70px}.play-panel{top:42%}.menu-choice{display:block;position:relative;width:100%;border:0;background:#000;color:var(--green);font-size:clamp(25px,3vw,47px);line-height:1.55;text-align:center}.menu-choice small{display:block;font-size:12px;color:#aaa}.menu-choice.selected:before{content:'';position:absolute;left:-52px;top:50%;width:29px;height:29px;transform:translateY(-50%);border-radius:50%;background:linear-gradient(#db1934 0 45%,#fff 46% 55%,#fff 56%);border:3px solid #222;box-shadow:inset 0 0 0 3px #fff}.menu-trio{position:absolute;z-index:2;right:2%;bottom:-1%;height:36vh;display:flex;align-items:end}.menu-trio img{width:14vw;max-width:210px;max-height:36vh;object-fit:contain;image-rendering:pixelated}.orange-corner{position:absolute;right:-5%;bottom:-18%;z-index:1;width:27vw;height:47vh;background:var(--orange);border-radius:50%}.play-character{position:absolute;right:5%;bottom:-2%;z-index:2;max-height:53vh;max-width:29vw;object-fit:contain;image-rendering:pixelated}.back{position:absolute;z-index:4;left:3%;bottom:4%;font-size:14px}.team-panel{position:absolute;left:11%;top:19%;width:49%;height:68%;padding:20px}.team-panel h1,.settings-panel h1,.credits-panel h1{color:var(--green);text-align:center;margin:0 0 20px;font-size:clamp(22px,3vw,45px)}.fighter-list{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.fighter-choice{background:#000;border:3px solid transparent;color:#fff;text-align:left;display:flex;align-items:center;font-weight:bold;padding:4px}.fighter-choice img{height:72px;width:72px;object-fit:contain;image-rendering:pixelated}.fighter-choice.selected{border-color:#fff}.team-preview{position:absolute;right:9%;top:25%;width:26%;min-height:51%;text-align:center;padding:10px}.team-preview img{height:25vh;max-width:100%;object-fit:contain;image-rendering:pixelated}.team-preview h2,.team-preview p{margin:8px;font-size:clamp(12px,1.4vw,20px)}.confirm{position:absolute;right:15%;bottom:13%;z-index:3}.dex-panel{position:absolute;left:4%;top:10%;width:65%;height:80%;padding:28px;display:grid;grid-template-columns:54px 1fr 54px;align-items:center}.ifdex-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.dex-choice{background:#000;border:4px solid transparent;color:#fff;min-height:190px;padding:5px}.dex-choice img{display:block;margin:auto;width:100%;height:145px;object-fit:contain;image-rendering:pixelated}.dex-choice.selected{border-color:#fff}.dex-arrow{font-size:78px;line-height:1;background:#000;color:var(--green);border:0}.dex-detail{position:absolute;right:5%;top:48%;width:25%;min-height:34%;padding:18px;text-align:center}.dex-detail img{position:absolute;bottom:calc(100% + 12px);left:50%;transform:translateX(-50%);height:38vh;max-width:100%;object-fit:contain;image-rendering:pixelated}.dex-detail h2{color:var(--green);font-size:clamp(18px,2vw,32px)}.settings-panel,.credits-panel{position:absolute;left:10%;top:7%;width:68%;min-height:78%;padding:45px 11%}.settings-panel p{display:grid;grid-template-columns:42% 1fr;gap:20px;align-items:center;color:#fff;font-size:clamp(14px,1.8vw,27px)}kbd{color:var(--green);font:inherit;border:4px solid #fff;padding:5px}.settings-panel label{display:block;color:var(--green);font-size:clamp(16px,2vw,27px);margin:18px}.settings-panel input{width:22px;height:22px;accent-color:var(--green)}.credits-panel{text-align:center;line-height:2;font-size:clamp(16px,2vw,28px)}.battle{background-position:center}.battle:after{content:'';position:absolute;inset:65% 0 0;background:#14531499;z-index:0}.battle-sprite{position:absolute;z-index:2;object-fit:contain;image-rendering:pixelated;max-width:36vw;animation:bob 2s steps(4) infinite}@keyframes bob{50%{transform:translateY(-7px)}}.enemy{right:11%;top:9%;height:31vh}.player{left:11%;bottom:20%;height:36vh}.hp-card{position:absolute;z-index:3;top:11%;left:10%;width:250px;background:#fff;color:#000;border:4px solid #000;padding:10px;font-weight:bold}.player-card{top:auto;bottom:27%;left:auto;right:10%}.hp-track{height:13px;border:2px solid #000;background:#777;margin-top:6px}.hp-fill{height:100%;background:#20a538;transition:width .5s steps(5)}.hp-fill.warn{background:#f89400}.battle-box{position:absolute;z-index:4;bottom:3%;left:7%;right:7%;background:#000;border:8px solid #fff;padding:14px;min-height:145px}.battle-box p{min-height:25px;margin:0 0 8px}.move-list{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.move-list button{background:#000;border:2px solid var(--green);color:#fff;padding:8px;text-align:left}.move-list button.selected,.move-list button:focus{border-color:#fff;outline:0}.result{position:absolute;z-index:8;left:50%;top:50%;transform:translate(-50%,-50%);padding:30px;text-align:center}.result h1{color:var(--green)}#notice{position:fixed;z-index:9;left:50%;bottom:5%;transform:translateX(-50%);background:#000;border:4px solid #fff;padding:12px;color:var(--green)}.high-contrast{--green:#43ff3d}.reduced-motion *{animation:none!important;transition:none!important}@media(max-width:700px){body{overflow:auto}.corner-logo{top:3%;width:45vw}.opening-logo{width:55vw;top:12%}.demo{left:25%;top:34%}.opening-fighter{height:55vh;max-width:55vw;right:0}.menu-panel,.play-panel{left:6%;top:28%;min-width:0;width:65%;padding:25px 38px;border-width:8px}.menu-choice{font-size:26px}.menu-choice.selected:before{left:-33px;width:18px;height:18px}.menu-trio{height:22vh}.menu-trio img{width:22vw;max-height:22vh}.play-character{max-width:41vw;max-height:30vh}.team-panel{left:4%;top:12%;width:60%;height:auto}.team-preview{right:3%;top:52%;width:38%;min-height:0}.fighter-list{grid-template-columns:1fr}.fighter-choice img{height:45px;width:45px}.confirm{right:6%;bottom:6%}.dex-panel{left:2%;top:13%;width:67%;height:auto;padding:8px;grid-template-columns:24px 1fr 24px;border-width:7px}.ifdex-grid{grid-template-columns:repeat(2,1fr);gap:4px}.dex-choice{min-height:100px}.dex-choice img{height:80px}.dex-arrow{font-size:38px}.dex-detail{right:2%;top:55%;width:30%;padding:7px;border-width:6px;font-size:10px}.dex-detail img{height:25vh}.settings-panel,.credits-panel{left:4%;top:13%;width:92%;padding:25px;border-width:8px}.settings-panel p{grid-template-columns:1fr;font-size:14px;gap:7px}.enemy{height:21vh;right:2%}.player{height:25vh;left:2%;bottom:24%}.hp-card{left:2%;top:9%;width:150px;font-size:11px}.player-card{top:auto;bottom:31%;left:auto;right:2%}.battle-box{left:2%;right:2%;bottom:2%;border-width:5px;font-size:12px}.back{font-size:10px}}
+/* ==========================================================================
+   Variáveis visuais
+   ========================================================================== */
+
+:root {
+  --cor-verde: #19bb17;
+  --cor-laranja: #f89400;
+  --cor-branca: #ffffff;
+  --cor-preta: #000000;
+  --cor-fundo: #080405;
+  --cor-painel: #000000;
+  --cor-texto-secundario: #b8b8b8;
+  --cor-foco: #ffe600;
+  --cor-vida: #20a538;
+  --cor-trilha-vida: #777777;
+  --cor-perigo: #f89400;
+  --borda-painel: 0.75rem;
+  --espacamento-seguro: max(1rem, env(safe-area-inset-left));
+  --sombra-texto: 0.125rem 0.125rem 0 var(--cor-preta);
+}
+
+/* ==========================================================================
+   Base e acessibilidade
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 20rem;
+  min-height: 100%;
+  color-scheme: dark;
+  background: var(--cor-fundo);
+}
+
+body {
+  min-width: 20rem;
+  min-height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--cor-fundo);
+  color: var(--cor-branca);
+  font-family: "Courier New", Courier, monospace;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+img,
+video {
+  max-width: 100%;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.somente-leitores {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.selecionavel {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  touch-action: manipulation;
+}
+
+.selecionavel:focus-visible,
+.selecionavel.com-foco {
+  outline: 0.25rem solid var(--cor-foco);
+  outline-offset: 0.25rem;
+}
+
+/* ==========================================================================
+   Estrutura das telas
+   ========================================================================== */
+
+.tela {
+  position: relative;
+  display: none;
+  isolation: isolate;
+  width: 100%;
+  min-height: 100vh;
+  min-height: max(100dvh, 42rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tela.ativa {
+  display: block;
+  animation: entrada-tela 180ms steps(3);
+}
+
+@keyframes entrada-tela {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.campus,
+.abertura,
+.batalha {
+  background-color: #050304;
+  background-image: url("img/game/fundo.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+.campus::before,
+.abertura::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background: rgb(0 0 0 / 12%);
+  content: "";
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Botões e painéis compartilhados
+   ========================================================================== */
+
+.botao-pixel,
+.botao-voltar,
+.botao-confirmar {
+  padding: 0.625rem 0.9375rem;
+  border: 0.25rem solid var(--cor-branca);
+  background: var(--cor-preta);
+  color: var(--cor-verde);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.botao-pixel:hover:not(:disabled),
+.botao-voltar:hover:not(:disabled),
+.botao-confirmar:hover:not(:disabled),
+.botao-pixel.selecionado,
+.botao-voltar.selecionado,
+.botao-confirmar.selecionado {
+  background: #101010;
+  color: var(--cor-branca);
+}
+
+.botao-voltar {
+  position: absolute;
+  z-index: 5;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: var(--espacamento-seguro);
+  font-size: 0.875rem;
+}
+
+.botao-confirmar {
+  position: absolute;
+  z-index: 4;
+  right: 15%;
+  bottom: 13%;
+}
+
+.painel-referencia {
+  border: var(--borda-painel) solid var(--cor-branca);
+  background: var(--cor-painel);
+  color: var(--cor-branca);
+}
+
+/* ==========================================================================
+   Introdução
+   ========================================================================== */
+
+.introducao {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--cor-preta);
+  place-items: center;
+}
+
+.introducao.ativa {
+  display: grid;
+}
+
+.introducao video {
+  width: min(100vw, 177.78vh);
+  height: min(100vh, 56.25vw);
+  height: min(100dvh, 56.25vw);
+  object-fit: contain;
+  background: var(--cor-preta);
+}
+
+.introducao .botao-pixel {
+  position: absolute;
+  z-index: 2;
+  font-size: clamp(1rem, 2vw, 1.75rem);
+}
+
+#ajuda-introducao {
+  position: absolute;
+  z-index: 2;
+  bottom: max(4%, env(safe-area-inset-bottom));
+  padding: 0.5rem;
+  color: var(--cor-branca);
+  text-align: center;
+  text-shadow: var(--sombra-texto);
+}
+
+.introducao.reproduzindo .botao-pixel,
+.introducao.reproduzindo #ajuda-introducao {
+  display: none;
+}
+
+/* ==========================================================================
+   Abertura
+   ========================================================================== */
+
+.logotipo-abertura {
+  position: absolute;
+  z-index: 2;
+  top: 15%;
+  left: 2.2%;
+  width: 35vw;
+  max-width: 33.75rem;
+}
+
+.demonstracao {
+  position: absolute;
+  z-index: 2;
+  top: 38%;
+  left: 23%;
+  color: var(--cor-laranja);
+  font-size: clamp(2.25rem, 7vw, 6.25rem);
+  letter-spacing: 0.15em;
+  text-shadow: var(--sombra-texto);
+}
+
+.lutador-abertura {
+  position: absolute;
+  z-index: 2;
+  right: 7%;
+  bottom: -2%;
+  height: 76vh;
+  max-width: 42vw;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.botao-iniciar {
+  position: absolute;
+  z-index: 3;
+  bottom: max(3%, env(safe-area-inset-bottom));
+  left: 50%;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  background: rgb(0 0 0 / 78%);
+  color: var(--cor-verde);
+  font-size: clamp(1.125rem, 2vw, 2rem);
+  text-shadow: var(--sombra-texto);
+  transform: translateX(-50%);
+  animation: piscar 1s steps(2) infinite;
+}
+
+@keyframes piscar {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ==========================================================================
+   Menu e escolha de modo
+   ========================================================================== */
+
+.logotipo-canto {
+  position: absolute;
+  z-index: 2;
+  top: 6%;
+  left: 3%;
+  width: 29vw;
+  max-width: 25.625rem;
+}
+
+.painel-menu,
+.painel-jogar {
+  position: absolute;
+  z-index: 3;
+  top: 42%;
+  left: 50%;
+  width: clamp(26.25rem, 40vw, 44rem);
+  padding: 2.625rem 4.375rem;
+  transform: translateX(-50%);
+}
+
+.opcao-menu {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  border: 0;
+  background: var(--cor-preta);
+  color: var(--cor-verde);
+  font-size: clamp(1.5625rem, 3vw, 2.9375rem);
+  line-height: 1.55;
+  text-align: center;
+}
+
+.opcao-menu small {
+  display: block;
+  color: var(--cor-texto-secundario);
+  font-size: 0.75rem;
+}
+
+.opcao-menu:hover:not(:disabled),
+.opcao-menu.selecionado {
+  color: var(--cor-branca);
+}
+
+.opcao-menu.selecionado::before {
+  position: absolute;
+  top: 50%;
+  left: -3.25rem;
+  width: 1.8125rem;
+  height: 1.8125rem;
+  border: 0.1875rem solid #222222;
+  border-radius: 50%;
+  background: linear-gradient(#db1934 0 45%, var(--cor-branca) 46% 100%);
+  box-shadow: inset 0 0 0 0.1875rem var(--cor-branca);
+  content: "";
+  transform: translateY(-50%);
+}
+
+.trio-menu {
+  position: absolute;
+  z-index: 2;
+  right: 2%;
+  bottom: -1%;
+  display: flex;
+  height: 36vh;
+  align-items: flex-end;
+}
+
+.trio-menu img {
+  width: 14vw;
+  max-width: 13.125rem;
+  max-height: 36vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.canto-laranja {
+  position: absolute;
+  z-index: 1;
+  right: -5%;
+  bottom: -18%;
+  width: 27vw;
+  height: 47vh;
+  border-radius: 50%;
+  background: var(--cor-laranja);
+  pointer-events: none;
+}
+
+.personagem-jogar {
+  position: absolute;
+  z-index: 2;
+  right: 5%;
+  bottom: -2%;
+  max-width: 29vw;
+  max-height: 53vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+/* ==========================================================================
+   Sala multiplayer
+   ========================================================================== */
+
+.painel-sala {
+  position: relative;
+  z-index: 3;
+  width: min(48rem, calc(100% - 2rem));
+  min-height: 24rem;
+  padding: clamp(1.5rem, 5vw, 3rem);
+  margin: clamp(7rem, 18vh, 10rem) auto 6rem;
+  text-align: center;
+}
+
+.painel-sala h1 {
+  margin: 0 0 2rem;
+  color: var(--cor-verde);
+  font-size: clamp(1.5rem, 3vw, 2.75rem);
+}
+
+#acoes-sala {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: end;
+}
+
+#acoes-sala label {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.5rem;
+  color: var(--cor-verde);
+  font-weight: 700;
+  text-align: left;
+}
+
+#acoes-sala > .botao-pixel:first-child {
+  grid-column: 1 / -1;
+}
+
+#codigo-sala {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  border: 0.1875rem solid var(--cor-branca);
+  border-radius: 0;
+  background: var(--cor-preta);
+  color: var(--cor-branca);
+  font-size: 1.125rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+#codigo-sala:focus-visible {
+  outline: 0.25rem solid var(--cor-foco);
+  outline-offset: 0.1875rem;
+}
+
+#espera-sala {
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+}
+
+#status-sala {
+  min-height: 1.5em;
+  margin: 0;
+}
+
+#codigo-sala-exibido {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 0.1875rem solid var(--cor-verde);
+  color: var(--cor-branca);
+  font-size: clamp(1.25rem, 4vw, 2rem);
+  letter-spacing: 0.2em;
+  overflow-wrap: anywhere;
+}
+
+.painel-sala[aria-busy="true"] {
+  cursor: progress;
+}
+
+/* ==========================================================================
+   Seleção de equipe
+   ========================================================================== */
+
+.painel-equipe {
+  position: absolute;
+  z-index: 2;
+  top: 19%;
+  left: 11%;
+  width: 49%;
+  height: 68%;
+  padding: 1.25rem;
+  overflow-y: auto;
+}
+
+.painel-equipe h1,
+.painel-configuracoes h1,
+.painel-creditos h1 {
+  margin: 0 0 1.25rem;
+  color: var(--cor-verde);
+  font-size: clamp(1.375rem, 3vw, 2.8125rem);
+  text-align: center;
+}
+
+.lista-lutadores {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+
+.opcao-lutador {
+  display: flex;
+  min-width: 0;
+  min-height: 5.25rem;
+  padding: 0.25rem;
+  border: 0.1875rem solid transparent;
+  align-items: center;
+  background: var(--cor-preta);
+  color: var(--cor-branca);
+  font-weight: 700;
+  text-align: left;
+}
+
+.opcao-lutador img {
+  flex: 0 0 auto;
+  width: 4.5rem;
+  height: 4.5rem;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.opcao-lutador span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.opcao-lutador:hover:not(:disabled),
+.opcao-lutador.selecionado {
+  border-color: var(--cor-branca);
+}
+
+.previa-lutador {
+  position: absolute;
+  z-index: 2;
+  top: 25%;
+  right: 9%;
+  width: 26%;
+  min-height: 51%;
+  padding: 0.625rem;
+  text-align: center;
+}
+
+.previa-lutador img {
+  width: auto;
+  max-width: 100%;
+  height: 25vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.previa-lutador h2,
+.previa-lutador p {
+  margin: 0.5rem;
+  font-size: clamp(0.875rem, 1.4vw, 1.25rem);
+  overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+   IFDex
+   ========================================================================== */
+
+.painel-dex {
+  position: absolute;
+  z-index: 2;
+  top: 10%;
+  left: 4%;
+  display: grid;
+  width: 65%;
+  height: 80%;
+  min-height: 34rem;
+  padding: 1.75rem;
+  grid-template-columns: 3.375rem minmax(0, 1fr) 3.375rem;
+  align-items: center;
+}
+
+.grade-ifdex {
+  display: grid;
+  max-height: 100%;
+  padding: 0.25rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.875rem;
+  overflow-y: auto;
+}
+
+.opcao-dex {
+  min-width: 0;
+  min-height: 11.875rem;
+  padding: 0.3125rem;
+  border: 0.25rem solid transparent;
+  background: var(--cor-preta);
+  color: var(--cor-branca);
+}
+
+.opcao-dex img {
+  display: block;
+  width: 100%;
+  height: 9.0625rem;
+  margin: auto;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.opcao-dex:hover:not(:disabled),
+.opcao-dex.selecionado {
+  border-color: var(--cor-branca);
+}
+
+.seta-dex {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0;
+  border: 0;
+  background: var(--cor-preta);
+  color: var(--cor-verde);
+  font-size: clamp(2.75rem, 6vw, 4.875rem);
+  line-height: 1;
+}
+
+.seta-dex:hover:not(:disabled),
+.seta-dex.selecionado {
+  color: var(--cor-branca);
+}
+
+.detalhe-dex {
+  position: absolute;
+  z-index: 2;
+  top: 48%;
+  right: 5%;
+  width: 25%;
+  min-height: 34%;
+  padding: 1.125rem;
+  text-align: center;
+}
+
+.detalhe-dex img {
+  position: absolute;
+  bottom: calc(100% + 0.75rem);
+  left: 50%;
+  width: auto;
+  max-width: 100%;
+  height: 38vh;
+  object-fit: contain;
+  image-rendering: pixelated;
+  transform: translateX(-50%);
+}
+
+.detalhe-dex h2 {
+  color: var(--cor-verde);
+  font-size: clamp(1.125rem, 2vw, 2rem);
+}
+
+.detalhe-dex p {
+  overflow-wrap: anywhere;
+}
+
+/* ==========================================================================
+   Configurações e créditos
+   ========================================================================== */
+
+.painel-configuracoes,
+.painel-creditos {
+  position: absolute;
+  z-index: 2;
+  top: 7%;
+  left: 10%;
+  width: 68%;
+  min-height: 78%;
+  padding: 2.8125rem 11%;
+}
+
+.painel-configuracoes p {
+  display: grid;
+  grid-template-columns: 42% minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+  color: var(--cor-branca);
+  font-size: clamp(0.875rem, 1.8vw, 1.6875rem);
+}
+
+kbd {
+  padding: 0.3125rem;
+  border: 0.25rem solid var(--cor-branca);
+  color: var(--cor-verde);
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+
+.painel-configuracoes label {
+  display: flex;
+  min-height: 2.75rem;
+  margin: 1.125rem;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--cor-verde);
+  font-size: clamp(1rem, 2vw, 1.6875rem);
+  cursor: pointer;
+}
+
+.painel-configuracoes input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  accent-color: var(--cor-verde);
+}
+
+.painel-configuracoes input[type="checkbox"]:focus-visible {
+  outline: 0.25rem solid var(--cor-foco);
+  outline-offset: 0.1875rem;
+}
+
+.painel-creditos {
+  font-size: clamp(1rem, 2vw, 1.75rem);
+  line-height: 2;
+  text-align: center;
+}
+
+/* ==========================================================================
+   Batalha
+   ========================================================================== */
+
+.batalha {
+  min-height: max(100dvh, 44rem);
+  background-position: center;
+}
+
+.batalha::after {
+  position: absolute;
+  z-index: 0;
+  inset: 65% 0 0;
+  background: rgb(20 83 20 / 60%);
+  content: "";
+  pointer-events: none;
+}
+
+.sprite-batalha {
+  position: absolute;
+  z-index: 2;
+  max-width: 36vw;
+  object-fit: contain;
+  image-rendering: pixelated;
+  animation: flutuar 2s steps(4) infinite;
+}
+
+@keyframes flutuar {
+  50% {
+    transform: translateY(-0.4375rem);
+  }
+}
+
+.inimigo {
+  top: 9%;
+  right: 11%;
+  height: 31vh;
+}
+
+.jogador {
+  bottom: 20%;
+  left: 11%;
+  height: 36vh;
+}
+
+.cartao-vida {
+  position: absolute;
+  z-index: 3;
+  top: 11%;
+  left: 10%;
+  width: 15.625rem;
+  padding: 0.625rem;
+  border: 0.25rem solid var(--cor-preta);
+  background: var(--cor-branca);
+  color: var(--cor-preta);
+  font-weight: 700;
+}
+
+.cartao-jogador {
+  top: auto;
+  right: 10%;
+  bottom: 27%;
+  left: auto;
+}
+
+.barra-vida {
+  --cor-vida-atual: var(--cor-vida);
+
+  width: 100%;
+  height: 1.0625rem;
+  margin-top: 0.375rem;
+  overflow: hidden;
+  border: 0.125rem solid var(--cor-preta);
+  background: var(--cor-trilha-vida);
+}
+
+.barra-vida.alerta,
+.cartao-vida.alerta {
+  --cor-vida-atual: var(--cor-perigo);
+}
+
+.barra-vida progress {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  appearance: none;
+  background: var(--cor-trilha-vida);
+  color: var(--cor-vida-atual);
+}
+
+.barra-vida progress.alerta {
+  --cor-vida-atual: var(--cor-perigo);
+}
+
+.barra-vida progress::-webkit-progress-bar {
+  background: var(--cor-trilha-vida);
+}
+
+.barra-vida progress::-webkit-progress-value {
+  background: var(--cor-vida-atual);
+  transition: width 500ms steps(5);
+}
+
+.barra-vida progress::-moz-progress-bar {
+  background: var(--cor-vida-atual);
+  transition: width 500ms steps(5);
+}
+
+.caixa-batalha {
+  position: absolute;
+  z-index: 4;
+  right: 7%;
+  bottom: 3%;
+  left: 7%;
+  min-height: 9.0625rem;
+  padding: 0.875rem;
+  border: 0.5rem solid var(--cor-branca);
+  background: var(--cor-preta);
+}
+
+.caixa-batalha p {
+  min-height: 1.5625rem;
+  margin: 0 0 0.5rem;
+}
+
+.lista-golpes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem;
+}
+
+.lista-golpes button {
+  min-width: 0;
+  min-height: 2.75rem;
+  padding: 0.5rem;
+  border: 0.125rem solid var(--cor-verde);
+  background: var(--cor-preta);
+  color: var(--cor-branca);
+  text-align: left;
+}
+
+.lista-golpes button:hover:not(:disabled),
+.lista-golpes button.selecionado,
+.lista-golpes button.com-foco {
+  border-color: var(--cor-branca);
+}
+
+.resultado {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  left: 50%;
+  width: min(32rem, calc(100% - 2rem));
+  padding: 1.875rem;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+.resultado h1 {
+  color: var(--cor-verde);
+}
+
+#aviso {
+  position: fixed;
+  z-index: 10;
+  right: 1rem;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  left: 1rem;
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  min-height: 2.75rem;
+  padding: 0.75rem;
+  margin: auto;
+  border: 0.25rem solid var(--cor-branca);
+  background: var(--cor-preta);
+  color: var(--cor-verde);
+  text-align: center;
+}
+
+/* ==========================================================================
+   Alto contraste
+   ========================================================================== */
+
+body.alto-contraste {
+  --cor-verde: #65ff60;
+  --cor-laranja: #ffd000;
+  --cor-texto-secundario: #ffffff;
+  --cor-foco: #00e5ff;
+  --cor-vida: #65ff60;
+  --cor-trilha-vida: #333333;
+  --cor-perigo: #ffd000;
+}
+
+body.alto-contraste .campus,
+body.alto-contraste .abertura,
+body.alto-contraste .batalha {
+  background-color: var(--cor-preta);
+  background-image: none;
+}
+
+body.alto-contraste .campus::before,
+body.alto-contraste .abertura::before,
+body.alto-contraste .batalha::after {
+  display: none;
+}
+
+body.alto-contraste .canto-laranja {
+  display: none;
+}
+
+/* ==========================================================================
+   Telas estreitas ou com pouca altura
+   ========================================================================== */
+
+@media (max-width: 700px), (max-height: 600px) and (orientation: landscape) {
+  .tela:not(.introducao) {
+    min-height: max(100dvh, 42rem);
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .logotipo-canto {
+    top: 1rem;
+    left: 1rem;
+    width: min(45vw, 13rem);
+  }
+
+  .botao-voltar {
+    top: max(1rem, env(safe-area-inset-top));
+    right: max(1rem, env(safe-area-inset-right));
+    bottom: auto;
+    left: auto;
+    font-size: 0.75rem;
+  }
+
+  .logotipo-abertura {
+    top: 10%;
+    width: min(55vw, 20rem);
+  }
+
+  .demonstracao {
+    top: 32%;
+    left: 20%;
+  }
+
+  .lutador-abertura {
+    right: 0;
+    height: 55vh;
+    max-width: 55vw;
+  }
+
+  .botao-iniciar {
+    width: max-content;
+    max-width: calc(100% - 2rem);
+    text-align: center;
+  }
+
+  .painel-menu,
+  .painel-jogar {
+    position: relative;
+    top: auto;
+    left: auto;
+    width: min(31rem, calc(100% - 2rem));
+    padding: 1.5rem 2.375rem;
+    margin: clamp(8rem, 28vh, 12rem) auto 12rem;
+    border-width: 0.5rem;
+    transform: none;
+  }
+
+  .opcao-menu {
+    font-size: clamp(1.25rem, 7vw, 1.625rem);
+  }
+
+  .opcao-menu.selecionado::before {
+    left: -2rem;
+    width: 1.125rem;
+    height: 1.125rem;
+  }
+
+  .trio-menu {
+    height: 22vh;
+  }
+
+  .trio-menu img {
+    width: 22vw;
+    max-height: 22vh;
+  }
+
+  .personagem-jogar {
+    max-width: 41vw;
+    max-height: 30vh;
+  }
+
+  .painel-sala,
+  .painel-equipe,
+  .painel-dex,
+  .detalhe-dex,
+  .painel-configuracoes,
+  .painel-creditos,
+  .previa-lutador {
+    position: relative;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    left: auto;
+    width: min(42rem, calc(100% - 2rem));
+    height: auto;
+    min-height: 0;
+    margin: 6.5rem auto 1rem;
+  }
+
+  .painel-sala,
+  .painel-equipe,
+  .painel-configuracoes,
+  .painel-creditos {
+    padding: 1.5rem;
+    border-width: 0.5rem;
+  }
+
+  #acoes-sala {
+    grid-template-columns: 1fr;
+  }
+
+  #acoes-sala label {
+    grid-column: auto;
+  }
+
+  #acoes-sala > .botao-pixel:first-child {
+    grid-column: auto;
+  }
+
+  .lista-lutadores {
+    grid-template-columns: 1fr;
+  }
+
+  .opcao-lutador {
+    min-height: 3.75rem;
+  }
+
+  .opcao-lutador img {
+    width: 3rem;
+    height: 3rem;
+  }
+
+  .previa-lutador {
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+
+  .previa-lutador img {
+    height: min(15rem, 32vh);
+  }
+
+  .botao-confirmar {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    display: block;
+    margin: 1rem auto 2rem;
+  }
+
+  .painel-dex {
+    display: grid;
+    padding: 0.75rem;
+    grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
+    border-width: 0.5rem;
+  }
+
+  .grade-ifdex {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+
+  .opcao-dex {
+    min-height: 6.5rem;
+  }
+
+  .opcao-dex img {
+    height: 5rem;
+  }
+
+  .seta-dex {
+    font-size: 2.375rem;
+  }
+
+  .detalhe-dex {
+    padding: 1rem;
+    margin-top: 1rem;
+    border-width: 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  .detalhe-dex img {
+    position: static;
+    display: block;
+    height: min(15rem, 30vh);
+    margin: 0 auto;
+    transform: none;
+  }
+
+  .painel-configuracoes p {
+    grid-template-columns: 1fr;
+    gap: 0.4375rem;
+    font-size: 0.875rem;
+  }
+
+  .painel-configuracoes label {
+    margin: 0.75rem 0;
+  }
+
+  .batalha {
+    min-height: max(100dvh, 44rem);
+  }
+
+  .inimigo {
+    top: 5.5rem;
+    right: 2%;
+    height: 21vh;
+  }
+
+  .jogador {
+    bottom: 25%;
+    left: 2%;
+    height: 25vh;
+  }
+
+  .cartao-vida {
+    top: 5rem;
+    left: 2%;
+    width: min(44vw, 10.5rem);
+    font-size: 0.75rem;
+  }
+
+  .cartao-jogador {
+    top: auto;
+    right: 2%;
+    bottom: 31%;
+    left: auto;
+  }
+
+  .caixa-batalha {
+    right: 2%;
+    bottom: 1rem;
+    left: 2%;
+    min-height: 10rem;
+    border-width: 0.3125rem;
+    font-size: 0.75rem;
+  }
+
+  .resultado {
+    position: fixed;
+  }
+}
+
+@media (max-width: 420px) {
+  .grade-ifdex,
+  .lista-golpes {
+    grid-template-columns: 1fr;
+  }
+
+  .painel-menu,
+  .painel-jogar {
+    padding-inline: 2rem;
+  }
+
+  .caixa-batalha {
+    max-height: 15rem;
+    overflow-y: auto;
+  }
+}
+
+/* ==========================================================================
+   Preferências de movimento e contraste do sistema
+   ========================================================================== */
+
+body.movimento-reduzido *,
+body.movimento-reduzido *::before,
+body.movimento-reduzido *::after {
+  scroll-behavior: auto !important;
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .painel-referencia,
+  .botao-pixel,
+  .botao-voltar,
+  .botao-confirmar,
+  .opcao-lutador,
+  .opcao-dex,
+  .lista-golpes button,
+  #codigo-sala {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  .selecionavel:focus-visible,
+  .selecionavel.com-foco,
+  #codigo-sala:focus-visible {
+    outline-color: Highlight;
+  }
+
+  .opcao-menu.selecionado::before {
+    border-color: Highlight;
+    background: Highlight;
+  }
+}
