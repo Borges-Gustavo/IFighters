@@ -49,6 +49,9 @@ PORT=4000 npm start
 3. Monte uma equipe com exatamente três IFighters. O primeiro selecionado será o inicial.
 4. Em cada turno, escolha **Lutar** para abrir os quatro movimentos ou **Pokémon** para trocar o integrante ativo.
 5. A troca consome o turno e acontece antes dos golpes. A batalha termina somente quando os três integrantes de uma equipe forem derrotados.
+6. Tipos, imunidades, resistências, fraquezas e STAB alteram o dano. A interface indica a efetividade de cada movimento contra o adversário atual.
+
+O adversário recebe uma equipe aleatória que não repete os seus integrantes e escolhe movimentos pelo dano esperado, considerando poder, precisão e tipos. Uma revanche mantém as mesmas equipes.
 
 ### Multiplayer em duas abas ou dispositivos da mesma rede
 
@@ -58,10 +61,10 @@ PORT=4000 npm start
 4. Copie o código exibido. No segundo cliente, informe esse código e escolha **Entrar**.
 5. Cada participante monta e confirma uma equipe de três IFighters. A equipe adversária permanece privada durante a seleção.
 6. Cada turno é resolvido depois que ambos escolhem um golpe ou uma troca. O servidor valida e resolve todas as ações.
-7. O navegador consulta o servidor por HTTP em intervalos curtos. Se a comunicação cair, o jogo tenta retomar a sessão autenticada por até 30 segundos sem perder vidas ou a ação pendente.
+7. O navegador consulta o servidor por HTTP em intervalos curtos. Se a comunicação cair, o jogo tenta retomar a sessão autenticada por até três minutos sem perder vidas ou a ação pendente.
 8. Ao final, os participantes podem solicitar uma revanche ou sair da sala.
 
-O servidor guarda as salas apenas em memória. Reiniciar o processo encerra as partidas e invalida os códigos existentes. O servidor escuta em `0.0.0.0` por padrão para aceitar dispositivos da mesma rede; defina a variável `HOST` se quiser restringir a interface de rede.
+O servidor guarda as salas apenas em memória. Reiniciar o processo encerra as partidas e invalida os códigos existentes. O servidor escuta em `0.0.0.0` por padrão para aceitar dispositivos da mesma rede; defina a variável `HOST` se quiser restringir a interface de rede. Sessões HTTP sem atividade expiram após 60 segundos, mas a vaga autenticada permanece reservada durante a janela de reconexão.
 
 ## Controles
 
@@ -88,7 +91,9 @@ IFighters/
 └── style.css            Identidade visual, responsividade e acessibilidade
 ```
 
-O navegador carrega `data.js`, `protocol.js`, `regras-batalha.js` e `app.js`. Os módulos compartilhados também expõem seus dados ao Node.js, evitando versões diferentes das regras no cliente e no servidor. As funções de batalha aceitam uma fonte de aleatoriedade substituível, o que permite testar acertos e desempates de modo previsível. O mesmo servidor HTTP publica os arquivos do jogo e mantém o estado autoritativo das salas com dois participantes.
+O navegador carrega `data.js`, `protocol.js`, `regras-batalha.js` e `app.js`. Os módulos compartilhados também expõem seus dados ao Node.js, evitando versões diferentes do protocolo, da tabela de tipos e das regras entre cliente e servidor. As funções de batalha aceitam uma fonte de aleatoriedade substituível, o que permite testar acertos, IA e desempates de modo previsível. O mesmo servidor HTTP publica os arquivos do jogo e mantém o estado autoritativo das salas com dois participantes.
+
+Os catálogos de equipe e IFDEX são renderizados somente quando abertos, em páginas pequenas. As imagens usam carregamento preguiçoso fora dos destaques e da arena, evitando baixar dezenas de sprites pesados na abertura.
 
 ## API multiplayer pela rede local
 
@@ -108,11 +113,20 @@ O corpo de uma ação mantém o envelope compartilhado:
 
 ```json
 {
-  "tipo": "nome_do_evento",
-  "dados": {},
-  "desde": 12
+  "tipo": "escolher_acao",
+  "dados": {
+    "numeroTurno": 3,
+    "acao": {
+      "tipo": "golpe",
+      "indiceGolpe": 0
+    }
+  },
+  "desde": 12,
+  "idComando": "82b85012-aab4-41bc-978c-bd53770efeb0"
 }
 ```
+
+O protocolo atual é a versão 4. Cada comando possui um identificador aleatório; repetir o mesmo comando é seguro e não executa a ação duas vezes. Reutilizar o identificador com outro conteúdo é recusado. Ações de batalha também informam o turno, impedindo que uma requisição atrasada seja aplicada na rodada seguinte.
 
 Fluxo principal dos eventos:
 
@@ -137,9 +151,9 @@ Fluxo principal dos eventos:
 | Servidor → cliente | `oponente_desconectado` | Informa a saída ou desconexão do outro participante. |
 | Servidor → cliente | `erro_sala` | Informa código inválido, sala cheia ou ação incompatível com o estado atual. |
 
-O estado compartilhado possui `codigo`, `situacao`, `numeroTurno` e `jogadores`. Cada jogador informa `id`, `equipe`, `lutadorAtivoId` e `revanche`; cada membro da equipe possui `lutadorId` e `vidaAtual`. A situação avança por `aguardando`, `selecao`, `batalha` e `encerrada`.
+O estado compartilhado possui `codigo`, `situacao`, `numeroTurno` e `jogadores`. Cada jogador informa `id`, `conectado`, `equipe`, `lutadorAtivoId` e `revanche`; cada membro da equipe possui `lutadorId` e `vidaAtual`. A situação avança por `aguardando`, `selecao`, `batalha` e `encerrada`.
 
-O servidor é a autoridade sobre validação, ordem, dano, troca, entrada automática da próxima reserva, vitória e revanche. Credenciais de retomada ficam apenas na sessão do navegador, e o token é rotacionado depois de cada reconexão bem-sucedida.
+O servidor é a autoridade sobre validação, turno, ordem, efetividade, dano, troca, entrada automática da próxima reserva, vitória e revanche. Credenciais de retomada ficam apenas na sessão do navegador, e o token é rotacionado depois de cada reconexão bem-sucedida.
 
 ## Codificação e recursos visuais
 
@@ -147,4 +161,4 @@ Os arquivos de texto usam UTF-8, finais de linha LF, indentação de dois espaç
 
 Os recursos visuais ficam em `img/game/` e `img/sprites/`. Os 37 sprites da IFDEX usam PNG, nomes em letras minúsculas ASCII e palavras separadas por hífen, por exemplo `img/sprites/leonardo-lucario.png`. Ao incluir ou renomear um arquivo, atualize também sua referência em `main.html`, `data.js` ou `style.css`. O fundo principal utilizado pela interface é `img/game/fundo.png`.
 
-A IFDEX é ordenada alfabeticamente e pode ser pesquisada por pessoa, Pokémon, tipo ou número. Cada registro exibe tipos, atributos e quatro movimentos com nome localizado, nome original, tipo e poder-base de referência.
+A IFDEX é ordenada alfabeticamente e pode ser pesquisada por pessoa, Pokémon, tipo ou número. Cada registro exibe tipos, atributos e quatro movimentos com nome localizado, nome original, tipo e poder-base de referência. A batalha usa uma escala arcade própria para manter partidas curtas; efeitos avançados como recuo, golpes múltiplos e condições de status ainda não são simulados.

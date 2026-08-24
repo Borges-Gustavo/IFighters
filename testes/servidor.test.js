@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const http = require("node:http");
 const test = require("node:test");
 
@@ -80,6 +81,7 @@ async function conectarCliente(contexto, porta) {
 
   const fila = [];
   let ultimoEventoId = 0;
+  let numeroTurno = 0;
   let filaEnvio = Promise.resolve();
   let fechada = false;
 
@@ -94,15 +96,32 @@ async function conectarCliente(contexto, porta) {
         continue;
       }
       ultimoEventoId = evento.id;
+      if (Number.isInteger(evento.dados?.estado?.numeroTurno)) {
+        numeroTurno = evento.dados.estado.numeroTurno;
+      }
       fila.push({ dados: evento.dados, tipo: evento.tipo });
     }
     return resposta;
   }
 
-  function enviar(tipo, dados = {}) {
+  function enviar(
+    tipo,
+    dados = {},
+    { idComando = crypto.randomUUID() } = {},
+  ) {
+    const dadosCompletos =
+      tipo === EVENTOS.ESCOLHER_ACAO &&
+      dados &&
+      typeof dados === "object" &&
+      !Array.isArray(dados) &&
+      dados.numeroTurno === undefined
+        ? { ...dados, numeroTurno }
+        : dados;
+
     return enviarConteudo(JSON.stringify({
-      dados,
+      dados: dadosCompletos,
       desde: ultimoEventoId,
+      idComando,
       tipo,
     }));
   }
@@ -351,7 +370,7 @@ test("a API cria sessões HTTP autenticadas e informa a rede local", async (cont
       transporte: interpretarJson(status).transporte,
       versaoProtocolo: interpretarJson(status).versaoProtocolo,
     },
-    { transporte: "http", versaoProtocolo: 3 },
+    { transporte: "http", versaoProtocolo: 4 },
   );
   assert.ok(Array.isArray(interpretarJson(status).enderecosRede));
 
@@ -368,6 +387,14 @@ test("a API cria sessões HTTP autenticadas e informa a rede local", async (cont
     (
       await requisitar(porta, caminho, "GET", {
         Authorization: `Bearer ${"x".repeat(43)}`,
+      })
+    ).codigo,
+    401,
+  );
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${"é".repeat(43)}`,
       })
     ).codigo,
     401,
@@ -418,6 +445,69 @@ test("a API multiplayer rejeita requisições de outra origem", async (contexto)
   assert.equal(interpretarJson(resposta).erro, "Origem não permitida.");
 });
 
+test("comandos repetidos são idempotentes e IDs conflitantes são recusados", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const cliente = await conectarCliente(contexto, porta);
+  await cliente.receber(EVENTOS.CONEXAO);
+  const idComando = crypto.randomUUID();
+
+  const primeiraResposta = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    {},
+    { idComando },
+  );
+  assert.equal(primeiraResposta.codigo, 200);
+  const salaCriada = await cliente.receber(EVENTOS.SALA_CRIADA);
+  assert.match(salaCriada.dados.codigo, /^[A-HJ-NP-Z2-9]{6}$/);
+
+  const repeticao = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    {},
+    { idComando },
+  );
+  assert.equal(repeticao.codigo, primeiraResposta.codigo);
+  assert.deepEqual(interpretarJson(repeticao).eventos, []);
+
+  const conflito = await cliente.enviar(
+    EVENTOS.SAIR_SALA,
+    {},
+    { idComando },
+  );
+  assert.equal(conflito.codigo, 409);
+  const erroConflito = await cliente.receber(EVENTOS.ERRO_SALA);
+  assert.match(erroConflito.dados.mensagem, /outro conteúdo/);
+  assert.equal(erroConflito.dados.recuperavel, false);
+
+  const idComandoOrdenado = crypto.randomUUID();
+  const comandoInvalido = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    { segundo: 2, primeiro: { beta: true, alfa: false } },
+    { idComando: idComandoOrdenado },
+  );
+  assert.equal(comandoInvalido.codigo, 200);
+  assert.equal(
+    (await cliente.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Dados inválidos para criar a sala.",
+  );
+
+  const repeticaoComOrdemDiferente = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    { primeiro: { alfa: false, beta: true }, segundo: 2 },
+    { idComando: idComandoOrdenado },
+  );
+  assert.equal(repeticaoComOrdemDiferente.codigo, comandoInvalido.codigo);
+  assert.deepEqual(
+    interpretarJson(repeticaoComOrdemDiferente).eventos,
+    [],
+  );
+
+  cliente.enviar(EVENTOS.CRIAR_SALA);
+  assert.equal(
+    (await cliente.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Você já está em uma sala.",
+  );
+});
+
 test("equipes trocam, lutam até o fim, reiniciam e saem", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
   const primeiro = await conectarCliente(contexto, porta);
@@ -427,7 +517,7 @@ test("equipes trocam, lutam até o fim, reiniciam e saem", async (contexto) => {
 
   assert.match(conexaoPrimeiro.jogadorId, /^[0-9a-f-]{36}$/i);
   assert.match(conexaoPrimeiro.tokenReconexao, /^[\w-]{43}$/);
-  assert.equal(conexaoPrimeiro.versaoProtocolo, 3);
+  assert.equal(conexaoPrimeiro.versaoProtocolo, 4);
   assert.notEqual(conexaoPrimeiro.jogadorId, conexaoSegundo.jogadorId);
   assert.match(preparada.codigo, /^[A-HJ-NP-Z2-9]{6}$/);
   assert.equal(preparada.estado.situacao, "batalha");
@@ -583,15 +673,22 @@ test("a API HTTP valida envelopes, equipes e ações sem corromper a sala", asyn
     /JSON válido/,
   );
 
-  primeiro.enviarConteudo(JSON.stringify({ tipo: "evento_inexistente", dados: {} }));
+  const semIdentificador = await primeiro.enviarConteudo(
+    JSON.stringify({ dados: {}, desde: 0, tipo: EVENTOS.CRIAR_SALA }),
+  );
+  assert.equal(semIdentificador.codigo, 400);
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "A requisição de evento é inválida.",
+  );
+
+  primeiro.enviar("evento_inexistente");
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
     "Evento desconhecido.",
   );
 
-  primeiro.enviarConteudo(
-    JSON.stringify({ tipo: EVENTOS.CRIAR_SALA, dados: [] }),
-  );
+  primeiro.enviar(EVENTOS.CRIAR_SALA, []);
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
     "Os dados do evento devem ser um objeto.",
@@ -754,6 +851,69 @@ test("eventos fora de ordem são recusados sem alterar a sessão", async (contex
   );
 });
 
+test("retries e ações atrasadas não antecipam o turno seguinte", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  await prepararBatalha(primeiro, segundo);
+  const idComando = crypto.randomUUID();
+  const acaoTurnoUm = {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+    numeroTurno: 1,
+  };
+
+  await primeiro.enviar(
+    EVENTOS.ESCOLHER_ACAO,
+    acaoTurnoUm,
+    { idComando },
+  );
+  await primeiro.receber(EVENTOS.ACAO_ACEITA);
+
+  const repeticao = await primeiro.enviar(
+    EVENTOS.ESCOLHER_ACAO,
+    acaoTurnoUm,
+    { idComando },
+  );
+  assert.equal(repeticao.codigo, 200);
+  assert.deepEqual(interpretarJson(repeticao).eventos, []);
+
+  segundo.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+    numeroTurno: 1,
+  });
+  await segundo.receber(EVENTOS.ACAO_ACEITA);
+  const [resultadoPrimeiro, resultadoSegundo] = await Promise.all([
+    primeiro.receber(EVENTOS.RESULTADO_TURNO),
+    segundo.receber(EVENTOS.RESULTADO_TURNO),
+  ]);
+  assert.equal(resultadoPrimeiro.dados.estado.numeroTurno, 2);
+  assert.deepEqual(resultadoPrimeiro, resultadoSegundo);
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, acaoTurnoUm);
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Essa ação não pertence ao turno atual.",
+  );
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+    numeroTurno: 3,
+  });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Essa ação não pertence ao turno atual.",
+  );
+
+  const segundoTurno = await enviarAcoes(
+    primeiro,
+    { tipo: "golpe", indiceGolpe: 0 },
+    segundo,
+    { tipo: "golpe", indiceGolpe: 0 },
+  );
+  assert.equal(segundoTurno.dados.numeroTurno, 2);
+  assert.equal(segundoTurno.dados.estado.numeroTurno, 3);
+});
+
 test("o limite de requisições bloqueia clientes abusivos", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
   const cliente = await conectarCliente(contexto, porta);
@@ -761,7 +921,7 @@ test("o limite de requisições bloqueia clientes abusivos", async (contexto) =>
 
   let ultimaResposta;
   for (let indice = 0; indice < 61; indice += 1) {
-    ultimaResposta = await cliente.enviarConteudo("{}");
+    ultimaResposta = await cliente.enviar("evento_inexistente");
   }
 
   assert.equal(ultimaResposta.codigo, 429);
@@ -829,6 +989,36 @@ test("uma partida continua após reconexão autenticada", async (contexto) => {
   reconectado.enviar(EVENTOS.SAIR_SALA);
   const saida = await segundo.receber(EVENTOS.OPONENTE_DESCONECTADO);
   assert.equal(saida.dados.temporario, false);
+});
+
+test("a retomada informa quando o adversário ainda está desconectado", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto, { prazoReconexao: 500 });
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  const preparada = await prepararBatalha(primeiro, segundo);
+
+  await primeiro.fechar();
+  await segundo.fechar();
+
+  const reconectado = await conectarCliente(contexto, porta);
+  await reconectado.receber(EVENTOS.CONEXAO);
+  reconectado.enviar(EVENTOS.REENTRAR_SALA, {
+    codigo: preparada.codigo,
+    jogadorId: preparada.conexaoPrimeiro.jogadorId,
+    tokenReconexao: preparada.conexaoPrimeiro.tokenReconexao,
+  });
+  const retomada = await reconectado.receber(EVENTOS.SALA_REENTRADA);
+  const jogadorAtual = obterJogadorNoEstado(
+    retomada.dados.estado,
+    preparada.conexaoPrimeiro.jogadorId,
+  );
+  const adversario = obterJogadorNoEstado(
+    retomada.dados.estado,
+    preparada.conexaoSegundo.jogadorId,
+  );
+
+  assert.equal(jogadorAtual.conectado, true);
+  assert.equal(adversario.conectado, false);
 });
 
 test("a reconexão durante a seleção não revela a equipe adversária", async (contexto) => {
@@ -932,8 +1122,10 @@ test("a vaga é liberada quando o prazo de reconexão termina", async (contexto)
     jogadorId: conexaoSegundo.dados.jogadorId,
     tokenReconexao: conexaoSegundo.dados.tokenReconexao,
   });
+  const erroRetomada = await intruso.receber(EVENTOS.ERRO_SALA);
   assert.equal(
-    (await intruso.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    erroRetomada.dados.mensagem,
     "Não foi possível retomar essa sessão.",
   );
+  assert.equal(erroRetomada.dados.recuperavel, false);
 });

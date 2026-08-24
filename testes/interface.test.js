@@ -104,7 +104,24 @@ test("a interface monta equipes de três e envia ações tipadas", () => {
   assert.match(APP, /EVENTOS\.ESCOLHER_ACAO/);
   assert.match(APP, /tipo: "golpe", indiceGolpe/);
   assert.match(APP, /tipo: "troca", lutadorId/);
+  assert.match(APP, /numeroTurno: batalha\.numeroTurno/);
   assert.doesNotMatch(APP, /EVENTOS\.(?:SELECIONAR_LUTADOR|ESCOLHER_GOLPE)/);
+});
+
+test("os catálogos carregam sob demanda, com busca e paginação", () => {
+  assert.match(HTML, /id="busca-equipe"[^>]+type="search"/);
+  assert.match(HTML, /id="resumo-equipe"/);
+  assert.match(HTML, /id="paginacao-equipe"/);
+  assert.match(APP, /const TAMANHO_PAGINA_EQUIPE = 12;/);
+  assert.match(APP, /const TAMANHO_PAGINA_IFDEX = 9;/);
+  assert.match(APP, /imagem\.loading = prioritaria \? "eager" : "lazy"/);
+
+  const inicializacao = APP.slice(
+    APP.indexOf("function inicializar()"),
+    APP.lastIndexOf("inicializar();"),
+  );
+  assert.doesNotMatch(inicializacao, /renderizarEquipe\(\)/);
+  assert.doesNotMatch(inicializacao, /renderizarIfdex\(\)/);
 });
 
 test("a IFDEX oferece busca e exibe dados técnicos dos movimentos", () => {
@@ -133,6 +150,22 @@ test("o cliente sincroniza por HTTP e retoma sessões interrompidas", () => {
   assert.match(APP, /EVENTOS\.REENTRAR_SALA/);
   assert.match(APP, /EVENTOS\.SALA_REENTRADA/);
   assert.match(APP, /EVENTOS\.OPONENTE_RECONECTADO/);
+  assert.match(APP, /EVENTOS\.VERSAO_PROTOCOLO/);
+  assert.match(APP, /idComando/);
+  assert.match(APP, /MAXIMO_TENTATIVAS_ENVIO/);
+  assert.match(APP, /PRAZO_RECONEXAO_CLIENTE = 175_000/);
+  assert.doesNotMatch(APP, /tentativasReconexao >= 6/);
   assert.match(APP, /dados\?\.temporario === true/);
   assert.doesNotMatch(APP, /\bwss?:/i);
+});
+
+test("voltar e o cache de navegação não deixam partidas ocultas", () => {
+  assert.match(
+    APP,
+    /telaAtual === "multijogador"\) \{[\s\S]*?sairDoMultijogador\("jogar"\)/,
+  );
+  assert.match(APP, /addEventListener\("pagehide", \(evento\)/);
+  assert.match(APP, /if \(evento\.persisted\) \{[\s\S]*?return;/);
+  assert.match(APP, /addEventListener\("pageshow", \(evento\)/);
+  assert.match(APP, /agendarPolling\(sessao, 0\)/);
 });

@@ -82,17 +82,18 @@ const TAMANHO_CODIGO = 6;
 const LIMITE_CORPO_JSON = 16 * 1024;
 const LIMITE_MENSAGENS_POR_JANELA = 60;
 const DURACAO_JANELA_MENSAGENS = 10_000;
-const PRAZO_RECONEXAO = 30_000;
-const TEMPO_INATIVIDADE_SESSAO = 10_000;
+const PRAZO_RECONEXAO = 180_000;
+const TEMPO_INATIVIDADE_SESSAO = 60_000;
 const INTERVALO_LIMPEZA_SESSOES = 1_000;
 const INTERVALO_POLLING_RECOMENDADO = 300;
 const MAXIMO_EVENTOS_POR_SESSAO = 512;
+const MAXIMO_COMANDOS_POR_SESSAO = 256;
 const MAXIMO_SESSOES = 200;
-const VERSAO_PROTOCOLO = 3;
 const QUANTIDADE_LUTADORES_EQUIPE = 3;
 const CODIGO_SALA_VALIDO = /^[A-HJ-NP-Z2-9]{6}$/;
 const TOKEN_RECONEXAO_VALIDO = /^[A-Za-z0-9_-]{43}$/;
 const IDENTIFICADOR_SESSAO_VALIDO = /^[A-Za-z0-9_-]{43}$/;
+const IDENTIFICADOR_COMANDO_VALIDO = /^[A-Za-z0-9_-]{22,64}$/;
 
 function ehObjetoSimples(valor) {
   return valor !== null && typeof valor === "object" && !Array.isArray(valor);
@@ -101,6 +102,55 @@ function ehObjetoSimples(valor) {
 function possuiSomenteCampos(objeto, camposPermitidos) {
   const permitidos = new Set(camposPermitidos);
   return Object.keys(objeto).every((campo) => permitidos.has(campo));
+}
+
+function assinarComando(tipo, dados) {
+  function normalizar(valor) {
+    if (Array.isArray(valor)) {
+      return valor.map(normalizar);
+    }
+
+    if (ehObjetoSimples(valor)) {
+      return Object.fromEntries(
+        Object.keys(valor)
+          .sort()
+          .map((chave) => [chave, normalizar(valor[chave])]),
+      );
+    }
+
+    return valor;
+  }
+
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        dados: normalizar(dados === undefined ? {} : dados),
+        tipo,
+      }),
+      "utf8",
+    )
+    .digest("base64url");
+}
+
+function guardarResultadoComando(sessao, idComando, assinatura, codigoHttp) {
+  sessao.comandosProcessados.set(idComando, { assinatura, codigoHttp });
+
+  while (sessao.comandosProcessados.size > MAXIMO_COMANDOS_POR_SESSAO) {
+    const idMaisAntigo = sessao.comandosProcessados.keys().next().value;
+    sessao.comandosProcessados.delete(idMaisAntigo);
+  }
+}
+
+function obterResultadoComando(sessao, idComando) {
+  const resultado = sessao.comandosProcessados.get(idComando) || null;
+  if (!resultado) {
+    return null;
+  }
+
+  sessao.comandosProcessados.delete(idComando);
+  sessao.comandosProcessados.set(idComando, resultado);
+  return resultado;
 }
 
 function caminhoEstaContido(raiz, candidato) {
@@ -535,8 +585,8 @@ function criarServidor({
     return true;
   }
 
-  function enviarErro(jogador, mensagem) {
-    enviar(jogador, EVENTOS.ERRO_SALA, { mensagem });
+  function enviarErro(jogador, mensagem, extras = {}) {
+    enviar(jogador, EVENTOS.ERRO_SALA, { mensagem, ...extras });
   }
 
   function transmitir(sala, tipo, dados) {
@@ -593,6 +643,10 @@ function criarServidor({
           destinatario &&
           jogador !== destinatario;
         return {
+          conectado: Boolean(
+            jogador.sessao?.ativa &&
+              sessoes.get(jogador.sessao.id) === jogador.sessao,
+          ),
           id: jogador.id,
           equipe: ocultarEquipe
             ? []
@@ -796,18 +850,29 @@ function criarServidor({
         continue;
       }
 
-      const dano = REGRAS_BATALHA.calcularDano(
+      const resultadoDano = REGRAS_BATALHA.calcularDanoDetalhado(
         acao.atacante,
         defensor,
         acao.golpe,
       );
+      const { dano, multiplicadorEfetividade } = resultadoDano;
       defensorMembro.vidaAtual = Math.max(
         0,
         defensorMembro.vidaAtual - dano,
       );
 
-      if (dano === 0) {
-        registros.push(`${acao.atacante.nome} usou ${acao.golpe.nome}.`);
+      if (resultadoDano.imune) {
+        registros.push(
+          `${acao.atacante.nome} usou ${acao.golpe.nome}, mas não afeta ${defensor.nome}.`,
+        );
+      } else if (multiplicadorEfetividade > 1) {
+        registros.push(
+          `${acao.atacante.nome} usou ${acao.golpe.nome}. É super efetivo: ${dano} de dano.`,
+        );
+      } else if (multiplicadorEfetividade < 1) {
+        registros.push(
+          `${acao.atacante.nome} usou ${acao.golpe.nome}. Não é muito efetivo: ${dano} de dano.`,
+        );
       } else {
         registros.push(
           `${acao.atacante.nome} usou ${acao.golpe.nome} e causou ${dano} de dano.`,
@@ -927,15 +992,17 @@ function criarServidor({
   }
 
   function tokensSaoIguais(primeiro, segundo) {
-    if (
-      typeof primeiro !== "string" ||
-      typeof segundo !== "string" ||
-      primeiro.length !== segundo.length
-    ) {
+    if (typeof primeiro !== "string" || typeof segundo !== "string") {
       return false;
     }
 
-    return crypto.timingSafeEqual(Buffer.from(primeiro), Buffer.from(segundo));
+    const primeiroBuffer = Buffer.from(primeiro, "utf8");
+    const segundoBuffer = Buffer.from(segundo, "utf8");
+    if (primeiroBuffer.length !== segundoBuffer.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(primeiroBuffer, segundoBuffer);
   }
 
   function reentrarNaSala(jogador, dados) {
@@ -945,12 +1012,16 @@ function criarServidor({
       typeof dados.jogadorId !== "string" ||
       !TOKEN_RECONEXAO_VALIDO.test(dados.tokenReconexao)
     ) {
-      enviarErro(jogador, "Credenciais de reconexão inválidas.");
+      enviarErro(jogador, "Credenciais de reconexão inválidas.", {
+        recuperavel: false,
+      });
       return;
     }
 
     if (jogador.codigoSala) {
-      enviarErro(jogador, "Você já está em uma sala.");
+      enviarErro(jogador, "Você já está em uma sala.", {
+        recuperavel: false,
+      });
       return;
     }
 
@@ -968,7 +1039,9 @@ function criarServidor({
         dados.tokenReconexao,
       )
     ) {
-      enviarErro(jogador, "Não foi possível retomar essa sessão.");
+      enviarErro(jogador, "Não foi possível retomar essa sessão.", {
+        recuperavel: false,
+      });
       return;
     }
 
@@ -1064,7 +1137,11 @@ function criarServidor({
   }
 
   function validarAcao(jogador, dados) {
-    if (!dadosSaoValidos(dados, ["acao"]) || !ehObjetoSimples(dados.acao)) {
+    if (
+      !dadosSaoValidos(dados, ["acao", "numeroTurno"]) ||
+      !Number.isInteger(dados.numeroTurno) ||
+      !ehObjetoSimples(dados.acao)
+    ) {
       return null;
     }
 
@@ -1113,6 +1190,16 @@ function criarServidor({
 
     if (jogador.acao) {
       enviarErro(jogador, "Você já escolheu uma ação neste turno.");
+      return;
+    }
+
+    if (!Number.isInteger(dados?.numeroTurno)) {
+      enviarErro(jogador, "Informe o turno da ação de batalha.");
+      return;
+    }
+
+    if (dados.numeroTurno !== sala.numeroTurno) {
+      enviarErro(jogador, "Essa ação não pertence ao turno atual.");
       return;
     }
 
@@ -1272,6 +1359,7 @@ function criarServidor({
     const sessao = {
       ativa: true,
       chave: crypto.randomBytes(32).toString("base64url"),
+      comandosProcessados: new Map(),
       eventos: [],
       id: crypto.randomBytes(32).toString("base64url"),
       jogador: null,
@@ -1297,7 +1385,7 @@ function criarServidor({
     enviar(jogador, EVENTOS.CONEXAO, {
       jogadorId: jogador.id,
       tokenReconexao: jogador.tokenReconexao,
-      versaoProtocolo: VERSAO_PROTOCOLO,
+      versaoProtocolo: EVENTOS.VERSAO_PROTOCOLO,
     });
     return sessao;
   }
@@ -1394,7 +1482,7 @@ function criarServidor({
         enderecosRede: listarEnderecosDaRede(portaAtual),
         intervaloPollingMs: INTERVALO_POLLING_RECOMENDADO,
         transporte: "http",
-        versaoProtocolo: VERSAO_PROTOCOLO,
+        versaoProtocolo: EVENTOS.VERSAO_PROTOCOLO,
       });
       return;
     }
@@ -1506,10 +1594,38 @@ function criarServidor({
       cursor === null ||
       cursor > sessao.ultimoEventoId ||
       !ehObjetoSimples(corpo) ||
-      !possuiSomenteCampos(corpo, ["tipo", "dados", "desde"])
+      !possuiSomenteCampos(corpo, ["tipo", "dados", "desde", "idComando"]) ||
+      typeof corpo.idComando !== "string" ||
+      !IDENTIFICADOR_COMANDO_VALIDO.test(corpo.idComando)
     ) {
       enviarErro(sessao.jogador, "A requisição de evento é inválida.");
       responderComEventos(requisicao, resposta, sessao, 0, 400);
+      return;
+    }
+
+    const assinatura = assinarComando(corpo.tipo, corpo.dados);
+    const resultadoAnterior = obterResultadoComando(
+      sessao,
+      corpo.idComando,
+    );
+    if (resultadoAnterior) {
+      if (resultadoAnterior.assinatura !== assinatura) {
+        enviarErro(
+          sessao.jogador,
+          "O identificador do comando já foi usado com outro conteúdo.",
+          { recuperavel: false },
+        );
+        responderComEventos(requisicao, resposta, sessao, cursor, 409);
+        return;
+      }
+
+      responderComEventos(
+        requisicao,
+        resposta,
+        sessao,
+        cursor,
+        resultadoAnterior.codigoHttp,
+      );
       return;
     }
 
@@ -1517,6 +1633,12 @@ function criarServidor({
       tipo: corpo.tipo,
       dados: corpo.dados,
     });
+    guardarResultadoComando(
+      sessao,
+      corpo.idComando,
+      assinatura,
+      codigoHttp,
+    );
     responderComEventos(requisicao, resposta, sessao, cursor, codigoHttp);
   }
 

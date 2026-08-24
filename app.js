@@ -10,8 +10,21 @@ const DURACOES = Object.freeze({
   dano: 700,
   intervaloReconexao: 900,
 });
-const CODIGO_SALA_VALIDO = /^[A-Z0-9]{6}$/;
+const CODIGO_SALA_VALIDO = /^[A-HJ-NP-Z2-9]{6}$/;
 const TAMANHO_EQUIPE = 3;
+const TAMANHO_PAGINA_EQUIPE = 12;
+const TAMANHO_PAGINA_IFDEX = 9;
+const MAXIMO_TENTATIVAS_ENVIO = 3;
+const PRAZO_RECONEXAO_CLIENTE = 175_000;
+const SPRITES_COM_FUNDO_CLARO = new Set([
+  "bocussi-lokix",
+  "conceicao-primarina",
+  "lazzari-bulbasaur",
+]);
+const SPRITES_COM_FUNDO_ESCURO = new Set([
+  "marcos-frogadier",
+  "patrick-arceus",
+]);
 const consultaMovimentoReduzido = window.matchMedia(
   "(prefers-reduced-motion: reduce)",
 );
@@ -122,6 +135,7 @@ function criarEstadoMultijogador() {
     estadoRemoto: null,
     tokenReconexao: null,
     reconectando: false,
+    inicioReconexaoEm: null,
     tentativasReconexao: 0,
     temporizadorReconexao: null,
     oponenteAusente: false,
@@ -138,11 +152,14 @@ const estadoAplicacao = {
   quadroFoco: null,
   lutadoresSelecionadosIds: [],
   lutadorEmPreviaId: null,
+  filtroEquipe: "",
+  paginaEquipe: 0,
   indiceIfdex: 0,
   filtroIfdex: "",
   painelBatalha: "acoes",
   modoBatalha: null,
   batalha: null,
+  historicoBatalha: [],
   identificadorTurnoLocal: 0,
   temporizadorAviso: null,
   configuracoes: carregarConfiguracoes(),
@@ -181,12 +198,65 @@ function criarElemento(etiqueta, texto = "", classes = []) {
   return elemento;
 }
 
+function configurarImagemLutador(
+  imagem,
+  lutador,
+  { prioritaria = false } = {},
+) {
+  imagem.src = lutador.sprite;
+  imagem.decoding = "async";
+  imagem.draggable = false;
+  imagem.loading = prioritaria ? "eager" : "lazy";
+  imagem.fetchPriority = prioritaria ? "high" : "low";
+  imagem.classList.toggle(
+    "sprite-fundo-claro",
+    SPRITES_COM_FUNDO_CLARO.has(lutador.id),
+  );
+  imagem.classList.toggle(
+    "sprite-fundo-escuro",
+    SPRITES_COM_FUNDO_ESCURO.has(lutador.id),
+  );
+}
+
+function criarIdComando() {
+  if (typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  let binario = "";
+  for (const byte of bytes) {
+    binario += String.fromCharCode(byte);
+  }
+  return btoa(binario)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function aguardar(duracao) {
+  return new Promise((resolver) => window.setTimeout(resolver, duracao));
+}
+
 function ehObjeto(valor) {
   return Boolean(valor) && typeof valor === "object" && !Array.isArray(valor);
 }
 
 function limitarNumero(valor, minimo, maximo) {
   return Math.min(maximo, Math.max(minimo, valor));
+}
+
+function embaralhar(lista, aleatorio = Math.random) {
+  const resultado = [...lista];
+  for (let indice = resultado.length - 1; indice > 0; indice -= 1) {
+    const sorteado = Math.floor(aleatorio() * (indice + 1));
+    [resultado[indice], resultado[sorteado]] = [
+      resultado[sorteado],
+      resultado[indice],
+    ];
+  }
+  return resultado;
 }
 
 function obterLutador(lutadorId) {
@@ -398,6 +468,11 @@ function irParaTela(
 }
 
 function voltarTela() {
+  if (estadoAplicacao.telaAtual === "multijogador") {
+    sairDoMultijogador("jogar");
+    return;
+  }
+
   if (
     estadoAplicacao.telaAtual === "equipe" &&
     estadoAplicacao.modoBatalha === "multijogador"
@@ -453,12 +528,78 @@ function renderizarEquipe() {
   const lista = exigirElemento("#lista-lutadores");
   const previa = exigirElemento("#previa-lutador");
   const status = exigirElemento("#status-equipe");
+  const contador = exigirElemento("#contador-equipe");
+  const paginacao = exigirElemento("#paginacao-equipe");
+  const resumo = exigirElemento("#resumo-equipe");
   const selecionados = estadoAplicacao.lutadoresSelecionadosIds;
   const lutadorEmPrevia =
     obterLutador(estadoAplicacao.lutadorEmPreviaId) ?? LUTADORES[0] ?? null;
+  const lutadoresFiltrados = obterLutadoresFiltradosEquipe();
+  const totalPaginas = Math.max(
+    1,
+    Math.ceil(lutadoresFiltrados.length / TAMANHO_PAGINA_EQUIPE),
+  );
+
+  estadoAplicacao.paginaEquipe = limitarNumero(
+    estadoAplicacao.paginaEquipe,
+    0,
+    totalPaginas - 1,
+  );
+
+  const inicioPagina =
+    estadoAplicacao.paginaEquipe * TAMANHO_PAGINA_EQUIPE;
+  const lutadoresDaPagina = lutadoresFiltrados.slice(
+    inicioPagina,
+    inicioPagina + TAMANHO_PAGINA_EQUIPE,
+  );
 
   lista.replaceChildren();
   previa.replaceChildren();
+  resumo.replaceChildren();
+
+  contador.textContent = lutadoresFiltrados.length
+    ? `${inicioPagina + 1}–${inicioPagina + lutadoresDaPagina.length} de ${lutadoresFiltrados.length}`
+    : "0 resultados";
+  paginacao.textContent = `Página ${estadoAplicacao.paginaEquipe + 1} de ${totalPaginas}`;
+  exigirElemento('[data-acao="equipe-anterior"]').disabled =
+    estadoAplicacao.paginaEquipe === 0;
+  exigirElemento('[data-acao="equipe-proximo"]').disabled =
+    estadoAplicacao.paginaEquipe >= totalPaginas - 1 ||
+    lutadoresFiltrados.length === 0;
+
+  for (let indice = 0; indice < TAMANHO_EQUIPE; indice += 1) {
+    const lutador = obterLutador(selecionados[indice]);
+    const slot = criarElemento("div", "", ["slot-equipe"]);
+    const ordem = criarElemento(
+      "span",
+      String(indice + 1),
+      ["numero-slot-equipe"],
+    );
+    const texto = criarElemento("span", "", ["texto-slot-equipe"]);
+
+    slot.append(ordem);
+    if (lutador) {
+      const imagem = criarElemento("img");
+      configurarImagemLutador(imagem, lutador);
+      imagem.alt = "";
+      texto.append(
+        criarElemento("strong", lutador.nome),
+        criarElemento(
+          "small",
+          indice === 0 ? "INICIAL" : "RESERVA",
+        ),
+      );
+      slot.classList.add("preenchido");
+      slot.append(imagem, texto);
+    } else {
+      texto.append(
+        criarElemento("strong", "Vaga livre"),
+        criarElemento("small", indice === 0 ? "INICIAL" : "RESERVA"),
+      );
+      slot.append(texto);
+    }
+    resumo.append(slot);
+  }
 
   if (!lutadorEmPrevia) {
     lista.append(criarElemento("p", "Nenhum lutador disponível."));
@@ -472,7 +613,17 @@ function renderizarEquipe() {
     (estadoAplicacao.multijogador.equipeConfirmada ||
       estadoAplicacao.multijogador.oponenteAusente);
 
-  const botoes = LUTADORES.map((lutador) => {
+  if (!lutadoresDaPagina.length) {
+    lista.append(
+      criarElemento(
+        "p",
+        "Nenhum IFighter corresponde à busca.",
+        ["lista-vazia"],
+      ),
+    );
+  }
+
+  const botoes = lutadoresDaPagina.map((lutador) => {
     const ordemNaEquipe = selecionados.indexOf(lutador.id);
     const selecionado = ordemNaEquipe >= 0;
     const limiteAtingido =
@@ -502,7 +653,7 @@ function renderizarEquipe() {
       botao.dataset.focoInicial = "";
     }
 
-    imagem.src = lutador.sprite;
+    configurarImagemLutador(imagem, lutador);
     imagem.alt = "";
     rotulo.append(nome, document.createElement("br"), forma);
 
@@ -524,7 +675,9 @@ function renderizarEquipe() {
   lista.append(...botoes);
 
   const imagemPrevia = criarElemento("img");
-  imagemPrevia.src = lutadorEmPrevia.sprite;
+  configurarImagemLutador(imagemPrevia, lutadorEmPrevia, {
+    prioritaria: true,
+  });
   imagemPrevia.alt = "";
   previa.append(
     imagemPrevia,
@@ -545,6 +698,47 @@ function renderizarEquipe() {
     : selecaoBloqueada
       ? "AGUARDANDO ADVERSÁRIO"
       : `CONFIRMAR EQUIPE (${selecionados.length}/${TAMANHO_EQUIPE})`;
+}
+
+function obterLutadoresFiltradosEquipe() {
+  const busca = normalizarBuscaIfdex(estadoAplicacao.filtroEquipe);
+
+  if (!busca) {
+    return LUTADORES;
+  }
+
+  return LUTADORES.filter((lutador) =>
+    normalizarBuscaIfdex(
+      [lutador.nome, lutador.forma, ...lutador.tipos].join(" "),
+    ).includes(busca),
+  );
+}
+
+function navegarEquipe(direcao) {
+  if (!Number.isInteger(direcao) || direcao === 0) {
+    return;
+  }
+
+  const quantidade = obterLutadoresFiltradosEquipe().length;
+  const ultimaPagina = Math.max(
+    0,
+    Math.ceil(quantidade / TAMANHO_PAGINA_EQUIPE) - 1,
+  );
+  const proximaPagina = limitarNumero(
+    estadoAplicacao.paginaEquipe + Math.sign(direcao),
+    0,
+    ultimaPagina,
+  );
+
+  if (proximaPagina === estadoAplicacao.paginaEquipe) {
+    return;
+  }
+
+  estadoAplicacao.paginaEquipe = proximaPagina;
+  renderizarEquipe();
+  focarElemento(
+    selecionar(".opcao-lutador:not([disabled])", exigirElemento("#lista-lutadores")),
+  );
 }
 
 function alternarLutadorDaEquipe(lutadorId, deveFocar = true) {
@@ -587,9 +781,9 @@ function renderizarIfdex() {
 
   grade.replaceChildren();
   detalhe.replaceChildren();
-  contador.textContent = `${lutadoresFiltrados.length} de ${LUTADORES.length}`;
 
   if (!lutadoresFiltrados.length) {
+    contador.textContent = `0 de ${LUTADORES.length}`;
     grade.append(
       criarElemento(
         "p",
@@ -613,8 +807,22 @@ function renderizarIfdex() {
   }
 
   const lutadorAtual = LUTADORES[estadoAplicacao.indiceIfdex];
+  const posicaoAtual = lutadoresFiltrados.findIndex(
+    ({ indice }) => indice === estadoAplicacao.indiceIfdex,
+  );
+  const inicioPagina =
+    Math.floor(Math.max(0, posicaoAtual) / TAMANHO_PAGINA_IFDEX) *
+    TAMANHO_PAGINA_IFDEX;
+  const lutadoresDaPagina = lutadoresFiltrados.slice(
+    inicioPagina,
+    inicioPagina + TAMANHO_PAGINA_IFDEX,
+  );
 
-  const botoes = lutadoresFiltrados.map(({ lutador, indice }) => {
+  contador.textContent =
+    `${inicioPagina + 1}–${inicioPagina + lutadoresDaPagina.length}` +
+    ` de ${lutadoresFiltrados.length}`;
+
+  const botoes = lutadoresDaPagina.map(({ lutador, indice }) => {
     const selecionado = indice === estadoAplicacao.indiceIfdex;
     const botao = criarElemento("button", "", ["opcao-dex", "selecionavel"]);
     const imagem = criarElemento("img");
@@ -629,7 +837,7 @@ function renderizarIfdex() {
       botao.dataset.focoInicial = "";
     }
 
-    imagem.src = lutador.sprite;
+    configurarImagemLutador(imagem, lutador);
     imagem.alt = "";
     botao.append(imagem, criarElemento("small", lutador.nome));
     return botao;
@@ -638,7 +846,9 @@ function renderizarIfdex() {
   grade.append(...botoes);
 
   const imagemDetalhe = criarElemento("img");
-  imagemDetalhe.src = lutadorAtual.sprite;
+  configurarImagemLutador(imagemDetalhe, lutadorAtual, {
+    prioritaria: true,
+  });
   imagemDetalhe.alt = "";
   const identificacao = criarElemento(
     "p",
@@ -752,6 +962,17 @@ function selecionarItemIfdex(indice, deveFocar = true) {
     );
     botao?.scrollIntoView({ block: "nearest", inline: "nearest" });
     focarElemento(botao);
+
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      requestAnimationFrame(() => {
+        exigirElemento("#detalhe-dex").scrollIntoView({
+          behavior: estadoAplicacao.configuracoes.animacoes
+            ? "smooth"
+            : "auto",
+          block: "start",
+        });
+      });
+    }
   }
 }
 
@@ -892,18 +1113,32 @@ function renderizarGolpes() {
   }
 
   const membroAtivo = obterMembroAtivo(batalha.jogador);
+  const membroAlvo = obterMembroAtivo(batalha.inimigo);
 
-  if (!membroAtivo) {
+  if (!membroAtivo || !membroAlvo) {
     return;
   }
 
   lista.dataset.lutadorId = membroAtivo.lutador.id;
+  lista.dataset.alvoId = membroAlvo.lutador.id;
 
   const botoes = membroAtivo.lutador.golpes.map((golpe, indice) => {
     const botao = criarElemento("button", "", ["selecionavel"]);
+    const efetividade = REGRAS_BATALHA.calcularEfetividade(
+      golpe.tipo,
+      membroAlvo.lutador.tipos,
+    );
+    const situacaoTipo =
+      efetividade === 0
+        ? "NÃO AFETA"
+        : efetividade > 1
+          ? "SUPER EFETIVO"
+          : efetividade < 1
+            ? "RESISTIDO"
+            : "DANO NORMAL";
     const detalhes = criarElemento(
       "small",
-      `${golpe.tipo} · ${golpe.poder > 0 ? golpe.poder : "—"}`,
+      `${golpe.tipo} · POD ${golpe.poder > 0 ? golpe.poder : "—"} · ${situacaoTipo}`,
     );
 
     botao.type = "button";
@@ -913,6 +1148,9 @@ function renderizarGolpes() {
       `${golpe.nome}, tipo ${golpe.tipo}, poder ${golpe.poder}`,
     );
     botao.append(document.createTextNode(`${golpe.nome} `), detalhes);
+    botao.classList.toggle("golpe-ineficaz", efetividade === 0);
+    botao.classList.toggle("golpe-resistido", efetividade > 0 && efetividade < 1);
+    botao.classList.toggle("golpe-super-efetivo", efetividade > 1);
 
     if (indice === 0) {
       botao.dataset.focoInicial = "";
@@ -962,7 +1200,7 @@ function renderizarEquipeBatalha() {
       focoTrocaDefinido = true;
     }
 
-    imagem.src = membro.lutador.sprite;
+    configurarImagemLutador(imagem, membro.lutador);
     imagem.alt = "";
     texto.append(
       criarElemento("strong", membro.lutador.nome),
@@ -1031,9 +1269,13 @@ function renderizarBatalha({ recriarGolpes = false } = {}) {
     return;
   }
 
-  spriteInimigo.src = membroInimigo.lutador.sprite;
+  configurarImagemLutador(spriteInimigo, membroInimigo.lutador, {
+    prioritaria: true,
+  });
   spriteInimigo.alt = `${membroInimigo.lutador.nome}, ${membroInimigo.lutador.forma}`;
-  spriteJogador.src = membroJogador.lutador.sprite;
+  configurarImagemLutador(spriteJogador, membroJogador.lutador, {
+    prioritaria: true,
+  });
   spriteJogador.alt = `${membroJogador.lutador.nome}, ${membroJogador.lutador.forma}`;
 
   renderizarCartaoVida("#cartao-inimigo", batalha.inimigo);
@@ -1043,7 +1285,8 @@ function renderizarBatalha({ recriarGolpes = false } = {}) {
 
   if (
     recriarGolpes ||
-    lista.dataset.lutadorId !== membroJogador.lutador.id
+    lista.dataset.lutadorId !== membroJogador.lutador.id ||
+    lista.dataset.alvoId !== membroInimigo.lutador.id
   ) {
     renderizarGolpes();
   } else {
@@ -1054,7 +1297,27 @@ function renderizarBatalha({ recriarGolpes = false } = {}) {
 }
 
 function mostrarMensagemBatalha(texto) {
-  exigirElemento("#mensagem-batalha").textContent = String(texto);
+  const mensagem = String(texto);
+  const log = exigirElemento("#log-batalha");
+
+  exigirElemento("#mensagem-batalha").textContent = mensagem;
+
+  if (estadoAplicacao.historicoBatalha.at(-1) !== mensagem) {
+    estadoAplicacao.historicoBatalha.push(mensagem);
+    estadoAplicacao.historicoBatalha =
+      estadoAplicacao.historicoBatalha.slice(-4);
+  }
+
+  log.replaceChildren(
+    ...estadoAplicacao.historicoBatalha.map((registro) =>
+      criarElemento("li", registro),
+    ),
+  );
+}
+
+function limparHistoricoBatalha() {
+  estadoAplicacao.historicoBatalha = [];
+  exigirElemento("#log-batalha").replaceChildren();
 }
 
 function ocultarResultadoBatalha() {
@@ -1101,6 +1364,13 @@ function cancelarTurnoLocal() {
 }
 
 function iniciarSelecaoLocal() {
+  if (
+    estadoAplicacao.modoBatalha === "multijogador" ||
+    estadoAplicacao.multijogador.sessaoId
+  ) {
+    desconectarMultijogador();
+  }
+
   cancelarTurnoLocal();
   estadoAplicacao.modoBatalha = "local";
   estadoAplicacao.batalha = null;
@@ -1109,7 +1379,7 @@ function iniciarSelecaoLocal() {
   irParaTela("equipe");
 }
 
-function iniciarBatalhaLocal() {
+function iniciarBatalhaLocal(idsEquipeInimiga = null) {
   const idsJogador = estadoAplicacao.lutadoresSelecionadosIds;
   const equipeJogador = idsJogador.map(obterLutador).filter(Boolean);
 
@@ -1124,27 +1394,18 @@ function iniciarBatalhaLocal() {
 
   cancelarTurnoLocal();
   const idsJogadorSet = new Set(idsJogador);
-  const indiceInicial = LUTADORES.findIndex(
-    (lutador) => lutador.id === idsJogador[0],
-  );
-  const equipeInimiga = [];
-
-  for (
-    let deslocamento = 1;
-    deslocamento <= LUTADORES.length;
-    deslocamento += 1
-  ) {
-    const candidato =
-      LUTADORES[(indiceInicial + deslocamento) % LUTADORES.length];
-
-    if (!idsJogadorSet.has(candidato.id)) {
-      equipeInimiga.push(candidato);
-    }
-
-    if (equipeInimiga.length === TAMANHO_EQUIPE) {
-      break;
-    }
-  }
+  const equipeMantida = Array.isArray(idsEquipeInimiga)
+    ? idsEquipeInimiga
+        .map(obterLutador)
+        .filter((lutador) => lutador && !idsJogadorSet.has(lutador.id))
+    : [];
+  const equipeInimiga =
+    equipeMantida.length === TAMANHO_EQUIPE &&
+    new Set(equipeMantida.map((lutador) => lutador.id)).size === TAMANHO_EQUIPE
+      ? equipeMantida
+      : embaralhar(
+          LUTADORES.filter((lutador) => !idsJogadorSet.has(lutador.id)),
+        ).slice(0, TAMANHO_EQUIPE);
 
   estadoAplicacao.modoBatalha = "local";
   estadoAplicacao.batalha = {
@@ -1155,6 +1416,7 @@ function iniciarBatalhaLocal() {
     encerrada: false,
   };
 
+  limparHistoricoBatalha();
   ocultarResultadoBatalha();
   renderizarBatalha({ recriarGolpes: true });
   irParaTela("batalha");
@@ -1229,10 +1491,28 @@ function criarAcaoLocal(ladoAtacante, ladoAlvo, golpe, batalha) {
   };
 }
 
-function criarAcaoInimigaLocal(batalha) {
+function criarAcaoInimigaLocal(batalha, aleatorio = Math.random) {
   const membroInimigo = obterMembroAtivo(batalha.inimigo);
+  const membroJogador = obterMembroAtivo(batalha.jogador);
   const golpes = membroInimigo.lutador.golpes;
-  const golpe = golpes[Math.floor(Math.random() * golpes.length)];
+  const melhorGolpe = REGRAS_BATALHA.escolherGolpeIA(
+    membroInimigo.lutador,
+    membroJogador.lutador,
+    aleatorio,
+  );
+  const golpesViaveis = golpes.filter(
+    (golpe) =>
+      REGRAS_BATALHA.pontuarGolpeIA(
+        membroInimigo.lutador,
+        membroJogador.lutador,
+        golpe,
+      ) > 0,
+  );
+  const variar = aleatorio() < 0.15;
+  const golpe = variar
+    ? golpesViaveis[Math.floor(aleatorio() * golpesViaveis.length)] ??
+      melhorGolpe
+    : melhorGolpe;
 
   return criarAcaoLocal("inimigo", "jogador", golpe, batalha);
 }
@@ -1300,14 +1580,25 @@ async function executarAtaqueLocal(acao, identificador, batalha) {
     return true;
   }
 
-  const dano = REGRAS_BATALHA.calcularDano(
+  const resultadoDano = REGRAS_BATALHA.calcularDanoDetalhado(
     membroAtacante.lutador,
     membroAlvo.lutador,
     acao.golpe,
   );
+  const { dano, multiplicadorEfetividade } = resultadoDano;
   membroAlvo.vidaAtual = Math.max(0, membroAlvo.vidaAtual - dano);
   renderizarBatalha();
-  mostrarMensagemBatalha(`O ataque causou ${dano} de dano.`);
+  if (resultadoDano.imune) {
+    mostrarMensagemBatalha(
+      `Não afeta ${membroAlvo.lutador.nome}. Nenhum dano foi causado.`,
+    );
+  } else if (multiplicadorEfetividade > 1) {
+    mostrarMensagemBatalha(`É super efetivo! ${dano} de dano.`);
+  } else if (multiplicadorEfetividade < 1) {
+    mostrarMensagemBatalha(`Não é muito efetivo. ${dano} de dano.`);
+  } else {
+    mostrarMensagemBatalha(`O ataque causou ${dano} de dano.`);
+  }
   await aguardarAnimacao(DURACOES.dano);
 
   if (!turnoLocalAindaValido(identificador, batalha)) {
@@ -1374,7 +1665,7 @@ async function trocarLutadorLocal(lutadorId) {
 function normalizarCodigoSala(valor) {
   return String(valor ?? "")
     .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
+    .replace(/[^A-HJ-NP-Z2-9]/g, "")
     .slice(0, 6);
 }
 
@@ -1420,7 +1711,8 @@ function validarEstadoRemoto(valor, quantidadeMinimaJogadores = 1) {
       typeof jogador.lutadorAtivoId !== "string" ||
       !Array.isArray(jogador.equipe) ||
       jogador.equipe.length !== TAMANHO_EQUIPE ||
-      typeof jogador.revanche !== "boolean"
+      typeof jogador.revanche !== "boolean" ||
+      typeof jogador.conectado !== "boolean"
     ) {
       return null;
     }
@@ -1458,7 +1750,7 @@ function validarEstadoRemoto(valor, quantidadeMinimaJogadores = 1) {
       lutadorAtivoId: jogador.lutadorAtivoId,
       equipe,
       revanche: jogador.revanche,
-      conectado: jogador.conectado !== false,
+      conectado: jogador.conectado,
     });
   }
 
@@ -1532,11 +1824,15 @@ function aplicarEstadoRemoto(
 
   estadoAplicacao.multijogador.estadoRemoto = estadoRemoto;
   estadoAplicacao.multijogador.codigoSala = estadoRemoto.codigo;
+  estadoAplicacao.multijogador.oponenteAusente =
+    participantes.inimigo.conectado === false;
   estadoAplicacao.batalha = {
     modo: "multijogador",
     jogador: participantes.jogador,
     inimigo: participantes.inimigo,
-    ocupada: estadoAplicacao.multijogador.aguardandoAcao,
+    ocupada:
+      estadoAplicacao.multijogador.aguardandoAcao ||
+      estadoAplicacao.multijogador.oponenteAusente,
     encerrada,
     vencedorId,
     numeroTurno: estadoRemoto.numeroTurno,
@@ -1700,7 +1996,15 @@ function agendarReconexao() {
     return;
   }
 
-  if (multijogador.tentativasReconexao >= 6) {
+  if (multijogador.inicioReconexaoEm === null) {
+    multijogador.inicioReconexaoEm = Date.now();
+  }
+
+  const tempoRestante =
+    PRAZO_RECONEXAO_CLIENTE -
+    (Date.now() - multijogador.inicioReconexaoEm);
+
+  if (tempoRestante <= 0) {
     mostrarAviso("Não foi possível retomar a conexão com a partida.");
     sairDoMultijogador("jogar");
     return;
@@ -1710,6 +2014,7 @@ function agendarReconexao() {
   const espera = Math.min(
     DURACOES.intervaloReconexao * multijogador.tentativasReconexao,
     3000,
+    tempoRestante,
   );
 
   multijogador.temporizadorReconexao = window.setTimeout(() => {
@@ -1903,40 +2208,101 @@ async function consultarEventosMultijogador(sessao) {
   );
 }
 
-async function enviarEventoHttp(sessao, tipo, dados) {
-  try {
-    const resposta = await requisitarApiMultijogador(
-      `${CAMINHO_API_MULTIJOGADOR}/sessoes/${sessao.sessaoId}/eventos`,
-      {
-        corpo: { dados, desde: sessao.ultimoEventoId, tipo },
-        metodo: "POST",
-        sessao,
-      },
-    );
-    if (estadoAplicacao.multijogador !== sessao) {
-      return;
-    }
-    validarLoteEventos(sessao, resposta);
-    sessao.falhasConsecutivas = 0;
-  } catch (erro) {
-    if (
-      estadoAplicacao.multijogador === sessao &&
-      ehObjeto(erro?.dados) &&
-      Array.isArray(erro.dados.eventos)
-    ) {
-      try {
-        validarLoteEventos(sessao, erro.dados);
-      } catch {
-        // A falha original continua sendo a informação mais útil.
-      }
-    }
+function restaurarInterfaceAposFalhaDeEnvio(sessao, tipo, erro) {
+  if (estadoAplicacao.multijogador !== sessao) {
+    return;
+  }
 
-    if (erro?.codigoHttp === 401) {
-      manipularPerdaDaSessao(sessao);
-    } else if (!Number.isInteger(erro?.codigoHttp)) {
+  const mensagem =
+    erro instanceof Error
+      ? erro.message
+      : "Não foi possível enviar a ação ao servidor.";
+
+  if ([EVENTOS.CRIAR_SALA, EVENTOS.ENTRAR_SALA].includes(tipo)) {
+    mostrarAcoesSala();
+  } else if (tipo === EVENTOS.SELECIONAR_EQUIPE) {
+    sessao.equipeConfirmada = false;
+    if (estadoAplicacao.telaAtual === "equipe") {
+      renderizarEquipe();
+    }
+  } else if (tipo === EVENTOS.ESCOLHER_ACAO) {
+    sessao.aguardandoAcao = false;
+    if (estadoAplicacao.batalha) {
+      estadoAplicacao.batalha.ocupada = false;
+      atualizarDisponibilidadeComandos();
+      mostrarPainelBatalha("acoes");
+      mostrarMensagemBatalha("A ação não foi enviada. Escolha novamente.");
+    }
+  } else if (tipo === EVENTOS.SOLICITAR_REVANCHE) {
+    sessao.revancheSolicitada = false;
+    const botao = exigirElemento("#botao-revanche");
+    botao.disabled = false;
+    botao.textContent = "SOLICITAR REVANCHE";
+  } else if (tipo === EVENTOS.REENTRAR_SALA) {
+    manipularPerdaDaSessao(sessao);
+  }
+
+  mostrarAviso(mensagem);
+}
+
+async function enviarEventoHttp(sessao, tipo, dados, idComando) {
+  let ultimoErro = null;
+
+  for (let tentativa = 1; tentativa <= MAXIMO_TENTATIVAS_ENVIO; tentativa += 1) {
+    try {
+      const resposta = await requisitarApiMultijogador(
+        `${CAMINHO_API_MULTIJOGADOR}/sessoes/${sessao.sessaoId}/eventos`,
+        {
+          corpo: {
+            dados,
+            desde: sessao.ultimoEventoId,
+            idComando,
+            tipo,
+          },
+          metodo: "POST",
+          sessao,
+        },
+      );
+      if (estadoAplicacao.multijogador !== sessao) {
+        return false;
+      }
+      validarLoteEventos(sessao, resposta);
+      sessao.falhasConsecutivas = 0;
+      return true;
+    } catch (erro) {
+      ultimoErro = erro;
+      if (
+        estadoAplicacao.multijogador === sessao &&
+        ehObjeto(erro?.dados) &&
+        Array.isArray(erro.dados.eventos)
+      ) {
+        try {
+          validarLoteEventos(sessao, erro.dados);
+        } catch {
+          // A falha original continua sendo a informação mais útil.
+        }
+      }
+
+      if (erro?.codigoHttp === 401) {
+        manipularPerdaDaSessao(sessao);
+        return false;
+      }
+
+      if (
+        Number.isInteger(erro?.codigoHttp) ||
+        tentativa === MAXIMO_TENTATIVAS_ENVIO ||
+        estadoAplicacao.multijogador !== sessao
+      ) {
+        break;
+      }
+
       sessao.falhasConsecutivas += 1;
+      await aguardar(200 * tentativa);
     }
   }
+
+  restaurarInterfaceAposFalhaDeEnvio(sessao, tipo, ultimoErro);
+  return false;
 }
 
 function enviarEvento(tipo, dados = {}) {
@@ -1947,8 +2313,9 @@ function enviarEvento(tipo, dados = {}) {
     return false;
   }
 
+  const idComando = criarIdComando();
   sessao.filaEnvio = sessao.filaEnvio.then(() =>
-    enviarEventoHttp(sessao, tipo, dados),
+    enviarEventoHttp(sessao, tipo, dados, idComando),
   );
   return true;
 }
@@ -1980,6 +2347,7 @@ async function sairEEncerrarSessao(sessao) {
         corpo: {
           dados: {},
           desde: sessao.ultimoEventoId,
+          idComando: criarIdComando(),
           tipo: EVENTOS.SAIR_SALA,
         },
         metodo: "POST",
@@ -2204,6 +2572,7 @@ function usarGolpeMultijogador(indiceGolpe) {
   if (
     enviarEvento(EVENTOS.ESCOLHER_ACAO, {
       acao: { tipo: "golpe", indiceGolpe },
+      numeroTurno: batalha.numeroTurno,
     })
   ) {
     estadoAplicacao.multijogador.aguardandoAcao = true;
@@ -2235,6 +2604,7 @@ function trocarLutadorMultijogador(lutadorId) {
   if (
     enviarEvento(EVENTOS.ESCOLHER_ACAO, {
       acao: { tipo: "troca", lutadorId },
+      numeroTurno: batalha.numeroTurno,
     })
   ) {
     estadoAplicacao.multijogador.aguardandoAcao = true;
@@ -2283,6 +2653,7 @@ function iniciarBatalhaMultijogador(dados) {
   estadoAplicacao.multijogador.revancheSolicitada = false;
   estadoAplicacao.multijogador.equipeConfirmada = false;
   estadoAplicacao.multijogador.estadoRemoto = null;
+  limparHistoricoBatalha();
   ocultarResultadoBatalha();
 
   if (!aplicarEstadoRemoto(estadoRemoto)) {
@@ -2391,7 +2762,11 @@ function atualizarStatusRevanche(dados) {
 
 function solicitarRevanche() {
   if (estadoAplicacao.modoBatalha === "local") {
-    iniciarBatalhaLocal();
+    const idsEquipeInimiga =
+      estadoAplicacao.batalha?.inimigo.equipe.map(
+        (membro) => membro.lutador.id,
+      ) ?? null;
+    iniciarBatalhaLocal(idsEquipeInimiga);
     return;
   }
 
@@ -2433,7 +2808,14 @@ function restaurarFluxoMultijogador(estado, acaoPendente, mensagem) {
   estadoAplicacao.multijogador.codigoSala = codigo;
   estadoAplicacao.multijogador.situacao = estado.situacao;
   estadoAplicacao.multijogador.aguardandoAcao = Boolean(acaoPendente);
-  estadoAplicacao.multijogador.oponenteAusente = false;
+  const adversario = Array.isArray(estado.jogadores)
+    ? estado.jogadores.find(
+        (participante) =>
+          participante?.id !== estadoAplicacao.multijogador.jogadorId,
+      )
+    : null;
+  estadoAplicacao.multijogador.oponenteAusente =
+    adversario?.conectado === false;
   estadoAplicacao.historicoTelas = [];
 
   if (["batalha", "encerrada"].includes(estado.situacao)) {
@@ -2528,6 +2910,7 @@ function tratarSalaReentrada(dados) {
   multijogador.jogadorId = dados.jogadorId;
   multijogador.tokenReconexao = dados.tokenReconexao;
   multijogador.reconectando = false;
+  multijogador.inicioReconexaoEm = null;
   multijogador.tentativasReconexao = 0;
   cancelarTemporizadorReconexao();
 
@@ -2603,6 +2986,12 @@ function tratarErroSala(dados) {
       : "O servidor recusou a solicitação.";
 
   if (estadoAplicacao.multijogador.reconectando) {
+    if (dados?.recuperavel === false) {
+      sairDoMultijogador("jogar");
+      mostrarAviso(mensagem);
+      return;
+    }
+
     const sessao = estadoAplicacao.multijogador;
     cancelarPolling(sessao);
     void encerrarSessaoRemota(sessao);
@@ -2641,7 +3030,7 @@ function tratarEventoMultijogador(tipo, dados) {
       !dados.jogadorId ||
       typeof dados.tokenReconexao !== "string" ||
       dados.tokenReconexao.length < 32 ||
-      dados.versaoProtocolo !== 3
+      dados.versaoProtocolo !== EVENTOS.VERSAO_PROTOCOLO
     ) {
       mostrarAviso("O servidor enviou uma identificação inválida.");
       return;
@@ -2824,6 +3213,8 @@ const ACOES = Object.freeze({
   "abrir-creditos": () => irParaTela("creditos"),
   voltar: voltarTela,
   "confirmar-equipe": confirmarEquipe,
+  "equipe-anterior": () => navegarEquipe(-1),
+  "equipe-proximo": () => navegarEquipe(1),
   "ifdex-anterior": () => navegarIfdex(-1),
   "ifdex-proximo": () => navegarIfdex(1),
   "sair-batalha": sairDaBatalha,
@@ -3099,6 +3490,12 @@ function registrarEventos() {
     renderizarIfdex();
   });
 
+  exigirElemento("#busca-equipe").addEventListener("input", (evento) => {
+    estadoAplicacao.filtroEquipe = evento.target.value;
+    estadoAplicacao.paginaEquipe = 0;
+    renderizarEquipe();
+  });
+
   consultaMovimentoReduzido.addEventListener("change", (evento) => {
     if (!estadoAplicacao.configuracoes.animacoesDefinidas) {
       estadoAplicacao.configuracoes.animacoes = !evento.matches;
@@ -3106,13 +3503,44 @@ function registrarEventos() {
     }
   });
 
-  window.addEventListener("pagehide", () => {
+  window.addEventListener("pagehide", (evento) => {
     salvarCredenciaisReconexao();
     const sessao = estadoAplicacao.multijogador;
     cancelarPolling(sessao);
-    void encerrarSessaoRemota(sessao, { manterAoSair: true });
 
+    if (evento.persisted) {
+      return;
+    }
+
+    void encerrarSessaoRemota(sessao, { manterAoSair: true });
     cancelarTurnoLocal();
+  });
+
+  window.addEventListener("pageshow", (evento) => {
+    if (!evento.persisted) {
+      return;
+    }
+
+    const sessao = estadoAplicacao.multijogador;
+    if (estadoAplicacao.modoBatalha === "multijogador") {
+      if (sessao.sessaoId && sessao.chaveSessao) {
+        sessao.pollingAtivo = true;
+        agendarPolling(sessao, 0);
+      } else if (
+        sessao.codigoSala &&
+        sessao.jogadorId &&
+        sessao.tokenReconexao
+      ) {
+        sessao.reconectando = true;
+        agendarReconexao();
+      }
+      return;
+    }
+
+    if (estadoAplicacao.batalha?.modo === "local") {
+      renderizarBatalha();
+      atualizarDisponibilidadeComandos();
+    }
   });
 }
 
@@ -3121,8 +3549,6 @@ function inicializar() {
     validarContratos();
     estadoAplicacao.lutadorEmPreviaId = LUTADORES[0].id;
     aplicarConfiguracoes();
-    renderizarEquipe();
-    renderizarIfdex();
     ocultarResultadoBatalha();
     registrarEventos();
 

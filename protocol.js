@@ -1,4 +1,4 @@
-const EVENTOS = Object.freeze({
+const EVENTOS = {
   CONEXAO: "conexao",
   CRIAR_SALA: "criar_sala",
   SALA_CRIADA: "sala_criada",
@@ -18,7 +18,13 @@ const EVENTOS = Object.freeze({
   SOLICITAR_REVANCHE: "solicitar_revanche",
   STATUS_REVANCHE: "status_revanche",
   SAIR_SALA: "sair_sala",
+};
+
+Object.defineProperty(EVENTOS, "VERSAO_PROTOCOLO", {
+  enumerable: false,
+  value: 4,
 });
+Object.freeze(EVENTOS);
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = EVENTOS;

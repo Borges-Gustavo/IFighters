@@ -15,6 +15,7 @@ test("o protocolo possui eventos únicos e serializáveis", () => {
 });
 
 test("o protocolo descreve equipes, ações tipadas e retomada de sessão", () => {
+  assert.equal(EVENTOS.VERSAO_PROTOCOLO, 4);
   assert.equal(EVENTOS.SELECIONAR_EQUIPE, "selecionar_equipe");
   assert.equal(EVENTOS.ESCOLHER_ACAO, "escolher_acao");
   assert.equal(EVENTOS.REENTRAR_SALA, "reentrar_sala");
