@@ -2,8 +2,8 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const fsPromises = require("node:fs/promises");
 const http = require("node:http");
+const os = require("node:os");
 const path = require("node:path");
-const { WebSocket, WebSocketServer } = require("ws");
 
 const LUTADORES = require("./data");
 const EVENTOS = require("./protocol");
@@ -46,7 +46,7 @@ const TIPOS_MIME = Object.freeze({
 const CABECALHOS_SEGURANCA = Object.freeze({
   "Content-Security-Policy": [
     "default-src 'self'",
-    "connect-src 'self' ws: wss:",
+    "connect-src 'self'",
     "img-src 'self' data:",
     "media-src 'self'",
     "object-src 'none'",
@@ -79,15 +79,20 @@ const LUTADORES_POR_ID = new Map(
 
 const ALFABETO_CODIGO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const TAMANHO_CODIGO = 6;
-const LIMITE_MENSAGEM = 16 * 1024;
+const LIMITE_CORPO_JSON = 16 * 1024;
 const LIMITE_MENSAGENS_POR_JANELA = 60;
 const DURACAO_JANELA_MENSAGENS = 10_000;
-const INTERVALO_VERIFICACAO_CONEXAO = 30_000;
 const PRAZO_RECONEXAO = 30_000;
-const VERSAO_PROTOCOLO = 2;
+const TEMPO_INATIVIDADE_SESSAO = 10_000;
+const INTERVALO_LIMPEZA_SESSOES = 1_000;
+const INTERVALO_POLLING_RECOMENDADO = 300;
+const MAXIMO_EVENTOS_POR_SESSAO = 512;
+const MAXIMO_SESSOES = 200;
+const VERSAO_PROTOCOLO = 3;
 const QUANTIDADE_LUTADORES_EQUIPE = 3;
 const CODIGO_SALA_VALIDO = /^[A-HJ-NP-Z2-9]{6}$/;
 const TOKEN_RECONEXAO_VALIDO = /^[A-Za-z0-9_-]{43}$/;
+const IDENTIFICADOR_SESSAO_VALIDO = /^[A-Za-z0-9_-]{43}$/;
 
 function ehObjetoSimples(valor) {
   return valor !== null && typeof valor === "object" && !Array.isArray(valor);
@@ -130,6 +135,103 @@ function enviarTexto(requisicao, resposta, codigoHttp, mensagem, extras = {}) {
   });
 
   resposta.end(requisicao.method === "HEAD" ? undefined : corpo);
+}
+
+function enviarJson(requisicao, resposta, codigoHttp, dados, extras = {}) {
+  if (resposta.headersSent) {
+    resposta.destroy();
+    return;
+  }
+
+  const corpo = Buffer.from(JSON.stringify(dados), "utf8");
+  aplicarCabecalhosSeguranca(resposta);
+  resposta.writeHead(codigoHttp, {
+    "Cache-Control": "no-store",
+    "Content-Length": corpo.length,
+    "Content-Type": "application/json; charset=utf-8",
+    ...extras,
+  });
+  resposta.end(requisicao.method === "HEAD" ? undefined : corpo);
+}
+
+function origemEhPermitida(requisicao) {
+  const origem = requisicao.headers.origin;
+  if (!origem) {
+    return true;
+  }
+
+  try {
+    return new URL(origem).host === requisicao.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+function lerCorpoJson(requisicao) {
+  return new Promise((resolver, rejeitar) => {
+    const partes = [];
+    let finalizado = false;
+    let tamanho = 0;
+
+    requisicao.on("data", (parte) => {
+      if (finalizado) {
+        return;
+      }
+      tamanho += parte.length;
+      if (tamanho > LIMITE_CORPO_JSON) {
+        finalizado = true;
+        const erro = new Error("O corpo da requisição excede o limite permitido.");
+        erro.codigoHttp = 413;
+        rejeitar(erro);
+        return;
+      }
+      partes.push(parte);
+    });
+
+    requisicao.on("end", () => {
+      if (finalizado) {
+        return;
+      }
+      finalizado = true;
+      if (tamanho === 0) {
+        resolver({});
+        return;
+      }
+
+      try {
+        resolver(JSON.parse(Buffer.concat(partes).toString("utf8")));
+      } catch {
+        const erro = new Error("O corpo da requisição não contém JSON válido.");
+        erro.codigoHttp = 400;
+        rejeitar(erro);
+      }
+    });
+    requisicao.on("error", (erro) => {
+      if (!finalizado) {
+        finalizado = true;
+        rejeitar(erro);
+      }
+    });
+  });
+}
+
+function listarEnderecosDaRede(porta) {
+  const enderecos = [];
+  let interfacesDisponiveis;
+  try {
+    interfacesDisponiveis = os.networkInterfaces();
+  } catch {
+    return enderecos;
+  }
+
+  for (const interfaces of Object.values(interfacesDisponiveis)) {
+    for (const interfaceRede of interfaces || []) {
+      if (interfaceRede.family === "IPv4" && !interfaceRede.internal) {
+        enderecos.push(`http://${interfaceRede.address}:${porta}`);
+      }
+    }
+  }
+  return [...new Set(enderecos)];
 }
 
 function extrairCaminhoDaRequisicao(requisicao) {
@@ -359,21 +461,46 @@ function criarCodigoSeguro(salas) {
 
 function criarServidor({
   porta = process.env.PORT || 3000,
+  host = process.env.HOST || "0.0.0.0",
   aleatorio = Math.random,
   prazoReconexao = PRAZO_RECONEXAO,
+  tempoInatividadeSessao = TEMPO_INATIVIDADE_SESSAO,
 } = {}) {
   const portaConfigurada = validarPorta(porta);
+  if (typeof host !== "string" || !host.trim()) {
+    throw new TypeError("O host do servidor deve ser uma string válida.");
+  }
   if (typeof aleatorio !== "function") {
     throw new TypeError("A fonte de aleatoriedade deve ser uma função.");
   }
   if (!Number.isInteger(prazoReconexao) || prazoReconexao < 10) {
     throw new TypeError("O prazo de reconexão deve ser de ao menos 10 ms.");
   }
+  if (!Number.isInteger(tempoInatividadeSessao) || tempoInatividadeSessao < 50) {
+    throw new TypeError("O tempo de inatividade deve ser de ao menos 50 ms.");
+  }
 
   const salas = new Map();
+  const sessoes = new Map();
   const atenderHttp = criarAtendedorHttp(__dirname);
   const servidorHttp = http.createServer((requisicao, resposta) => {
-    atenderHttp(requisicao, resposta).catch(() => {
+    let caminho;
+    try {
+      caminho = new URL(
+        requisicao.url || "/",
+        "http://servidor.local",
+      ).pathname;
+    } catch {
+      enviarJson(requisicao, resposta, 400, { erro: "Endereço inválido." });
+      return;
+    }
+
+    const atendimento = caminho.startsWith("/api/multijogador/")
+      ? atenderApiMultijogador(requisicao, resposta, caminho)
+      : atenderHttp(requisicao, resposta);
+
+    Promise.resolve(atendimento).catch((erro) => {
+      console.error("Falha ao atender uma requisição HTTP:", erro);
       enviarTexto(
         requisicao,
         resposta,
@@ -383,45 +510,29 @@ function criarServidor({
     });
   });
 
-  const servidorWebSocket = new WebSocketServer({
-    clientTracking: true,
-    maxPayload: LIMITE_MENSAGEM,
-    perMessageDeflate: false,
-    server: servidorHttp,
-    verifyClient: ({ origin, req }) => {
-      if (!origin) {
-        return true;
-      }
-
-      try {
-        return new URL(origin).host === req.headers.host;
-      } catch {
-        return false;
-      }
-    },
-  });
-
   let encerrado = false;
   let promessaDeInicio = null;
   let promessaDeEncerramento = null;
 
   function enviar(jogador, tipo, dados = {}) {
-    const conexao = jogador.conexao;
-    if (!conexao || conexao.readyState !== WebSocket.OPEN) {
+    const sessao = jogador.sessao;
+    if (!sessao?.ativa || sessoes.get(sessao.id) !== sessao) {
       return false;
     }
 
-    try {
-      conexao.send(JSON.stringify({ tipo, dados }), (erro) => {
-        if (erro && conexao.readyState !== WebSocket.CLOSED) {
-          conexao.terminate();
-        }
-      });
-      return true;
-    } catch {
-      conexao.terminate();
-      return false;
+    sessao.ultimoEventoId += 1;
+    sessao.eventos.push({
+      id: sessao.ultimoEventoId,
+      tipo,
+      dados,
+    });
+    if (sessao.eventos.length > MAXIMO_EVENTOS_POR_SESSAO) {
+      sessao.eventos.splice(
+        0,
+        sessao.eventos.length - MAXIMO_EVENTOS_POR_SESSAO,
+      );
     }
+    return true;
   }
 
   function enviarErro(jogador, mensagem) {
@@ -542,7 +653,7 @@ function criarServidor({
       return;
     }
 
-    jogador.conexao = null;
+    jogador.sessao = null;
     transmitir(sala, EVENTOS.OPONENTE_DESCONECTADO, {
       mensagem: "O adversário se desconectou. Aguardando reconexão…",
       prazoMs: prazoReconexao,
@@ -561,7 +672,9 @@ function criarServidor({
 
   function jogadoresEstaoConectados(sala) {
     return sala.jogadores.every(
-      (jogador) => jogador.conexao?.readyState === WebSocket.OPEN,
+      (jogador) =>
+        jogador.sessao?.ativa &&
+        sessoes.get(jogador.sessao.id) === jogador.sessao,
     );
   }
 
@@ -850,8 +963,6 @@ function criarServidor({
     if (
       !sala ||
       !jogadorAnterior ||
-      jogadorAnterior.conexao ||
-      !jogadorAnterior.temporizadorReconexao ||
       !tokensSaoIguais(
         jogadorAnterior.tokenReconexao,
         dados.tokenReconexao,
@@ -861,6 +972,11 @@ function criarServidor({
       return;
     }
 
+    if (jogadorAnterior.sessao) {
+      desativarSessao(jogadorAnterior.sessao, {
+        agendarReconexao: false,
+      });
+    }
     limparPrazoReconexao(jogadorAnterior);
     Object.assign(jogador, {
       acao: jogadorAnterior.acao,
@@ -1107,24 +1223,10 @@ function criarServidor({
     return jogador.mensagensNaJanela > LIMITE_MENSAGENS_POR_JANELA;
   }
 
-  function receberMensagem(jogador, conteudo, mensagemBinaria) {
+  function receberEvento(jogador, mensagem) {
     if (limiteDeMensagensExcedido(jogador)) {
       enviarErro(jogador, "Muitas mensagens foram enviadas em pouco tempo.");
-      jogador.conexao.close(1008, "Limite de mensagens excedido.");
-      return;
-    }
-
-    if (mensagemBinaria) {
-      enviarErro(jogador, "Mensagens binárias não são aceitas.");
-      return;
-    }
-
-    let mensagem;
-    try {
-      mensagem = JSON.parse(conteudo.toString("utf8"));
-    } catch {
-      enviarErro(jogador, "A mensagem enviada não contém JSON válido.");
-      return;
+      return 429;
     }
 
     if (
@@ -1133,89 +1235,304 @@ function criarServidor({
       typeof mensagem.tipo !== "string"
     ) {
       enviarErro(jogador, "A mensagem deve conter um tipo de evento válido.");
-      return;
+      return 400;
     }
 
     const dados = mensagem.dados === undefined ? {} : mensagem.dados;
     if (!ehObjetoSimples(dados)) {
       enviarErro(jogador, "Os dados do evento devem ser um objeto.");
-      return;
+      return 400;
     }
 
     if (!TODOS_EVENTOS.has(mensagem.tipo)) {
       enviarErro(jogador, "Evento desconhecido.");
-      return;
+      return 400;
     }
 
     if (!EVENTOS_RECEBIDOS.has(mensagem.tipo)) {
       enviarErro(jogador, "Esse evento não pode ser enviado pelo cliente.");
-      return;
+      return 400;
     }
 
     try {
       processarEvento(jogador, mensagem.tipo, dados);
+      return 200;
     } catch (erro) {
-      console.error("Falha ao processar uma mensagem WebSocket:", erro);
+      console.error("Falha ao processar um evento multiplayer:", erro);
       enviarErro(jogador, "Não foi possível processar o evento enviado.");
+      return 500;
     }
   }
 
-  servidorWebSocket.on("connection", (conexao) => {
+  function criarSessao() {
+    if (sessoes.size >= MAXIMO_SESSOES) {
+      return null;
+    }
+
+    const sessao = {
+      ativa: true,
+      chave: crypto.randomBytes(32).toString("base64url"),
+      eventos: [],
+      id: crypto.randomBytes(32).toString("base64url"),
+      jogador: null,
+      ultimaAtividade: Date.now(),
+      ultimoEventoId: 0,
+    };
     const jogador = {
       acao: null,
       codigoSala: null,
-      conexao,
       equipe: [],
       id: crypto.randomUUID(),
       inicioJanelaMensagens: Date.now(),
       lutadorAtivoId: null,
       mensagensNaJanela: 0,
       revanche: false,
+      sessao,
       temporizadorReconexao: null,
       tokenReconexao: criarTokenReconexao(),
     };
-
-    conexao.estaAtiva = true;
-    conexao.on("pong", () => {
-      conexao.estaAtiva = true;
-    });
-    conexao.on("message", (conteudo, mensagemBinaria) => {
-      receberMensagem(jogador, conteudo, mensagemBinaria);
-    });
-    conexao.on("close", () => {
-      if (encerrado) {
-        removerJogadorDaSala(jogador, null);
-      } else {
-        agendarRemocaoPorDesconexao(jogador);
-      }
-    });
-    conexao.on("error", () => {
-      // O evento "close" realiza a limpeza; este ouvinte evita erro não tratado.
-    });
+    sessao.jogador = jogador;
+    sessoes.set(sessao.id, sessao);
 
     enviar(jogador, EVENTOS.CONEXAO, {
       jogadorId: jogador.id,
       tokenReconexao: jogador.tokenReconexao,
       versaoProtocolo: VERSAO_PROTOCOLO,
     });
-  });
+    return sessao;
+  }
 
-  const verificadorDeConexoes = setInterval(() => {
-    for (const conexao of servidorWebSocket.clients) {
-      if (conexao.estaAtiva === false) {
-        conexao.terminate();
-        continue;
+  function desativarSessao(
+    sessao,
+    { agendarReconexao = !encerrado } = {},
+  ) {
+    if (!sessao?.ativa) {
+      return;
+    }
+
+    sessao.ativa = false;
+    sessoes.delete(sessao.id);
+    const jogador = sessao.jogador;
+    if (!jogador || jogador.sessao !== sessao) {
+      return;
+    }
+
+    jogador.sessao = null;
+    if (agendarReconexao) {
+      agendarRemocaoPorDesconexao(jogador);
+    } else if (encerrado) {
+      removerJogadorDaSala(jogador, null);
+    }
+  }
+
+  function autenticarSessao(requisicao, identificador) {
+    if (!IDENTIFICADOR_SESSAO_VALIDO.test(identificador)) {
+      return null;
+    }
+
+    const sessao = sessoes.get(identificador);
+    const autorizacao = requisicao.headers.authorization;
+    const prefixo = "Bearer ";
+    if (
+      !sessao?.ativa ||
+      typeof autorizacao !== "string" ||
+      !autorizacao.startsWith(prefixo) ||
+      !tokensSaoIguais(sessao.chave, autorizacao.slice(prefixo.length))
+    ) {
+      return null;
+    }
+
+    sessao.ultimaAtividade = Date.now();
+    return sessao;
+  }
+
+  function interpretarCursor(valor) {
+    if (valor === null || valor === undefined || valor === "") {
+      return 0;
+    }
+
+    const cursor = Number(valor);
+    return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : null;
+  }
+
+  function obterEventosDesde(sessao, cursor) {
+    return sessao.eventos.filter((evento) => evento.id > cursor);
+  }
+
+  function responderComEventos(
+    requisicao,
+    resposta,
+    sessao,
+    cursor,
+    codigoHttp = 200,
+  ) {
+    const primeiroId = sessao.eventos[0]?.id ?? sessao.ultimoEventoId + 1;
+    enviarJson(requisicao, resposta, codigoHttp, {
+      eventos: obterEventosDesde(sessao, cursor),
+      eventosPerdidos: cursor < primeiroId - 1,
+      ultimoEventoId: sessao.ultimoEventoId,
+    });
+  }
+
+  async function atenderApiMultijogador(requisicao, resposta, caminho) {
+    if (!origemEhPermitida(requisicao)) {
+      enviarJson(requisicao, resposta, 403, { erro: "Origem não permitida." });
+      return;
+    }
+
+    if (caminho === "/api/multijogador/status") {
+      if (requisicao.method !== "GET") {
+        enviarJson(requisicao, resposta, 405, { erro: "Método não permitido." }, {
+          Allow: "GET",
+        });
+        return;
       }
 
-      conexao.estaAtiva = false;
-      try {
-        conexao.ping();
-      } catch {
-        conexao.terminate();
+      const endereco = servidorHttp.address();
+      const portaAtual = typeof endereco === "object" ? endereco.port : portaConfigurada;
+      enviarJson(requisicao, resposta, 200, {
+        enderecosRede: listarEnderecosDaRede(portaAtual),
+        intervaloPollingMs: INTERVALO_POLLING_RECOMENDADO,
+        transporte: "http",
+        versaoProtocolo: VERSAO_PROTOCOLO,
+      });
+      return;
+    }
+
+    if (caminho === "/api/multijogador/sessoes") {
+      if (requisicao.method !== "POST") {
+        enviarJson(requisicao, resposta, 405, { erro: "Método não permitido." }, {
+          Allow: "POST",
+        });
+        return;
+      }
+
+      const sessao = criarSessao();
+      if (!sessao) {
+        enviarJson(requisicao, resposta, 503, {
+          erro: "O servidor atingiu o limite de jogadores conectados.",
+        });
+        return;
+      }
+
+      enviarJson(requisicao, resposta, 201, {
+        chaveSessao: sessao.chave,
+        eventos: obterEventosDesde(sessao, 0),
+        intervaloPollingMs: INTERVALO_POLLING_RECOMENDADO,
+        sessaoId: sessao.id,
+        ultimoEventoId: sessao.ultimoEventoId,
+      });
+      return;
+    }
+
+    const correspondencia = /^\/api\/multijogador\/sessoes\/([^/]+)(\/eventos)?$/.exec(
+      caminho,
+    );
+    if (!correspondencia) {
+      enviarJson(requisicao, resposta, 404, { erro: "Recurso não encontrado." });
+      return;
+    }
+
+    const sessao = autenticarSessao(requisicao, correspondencia[1]);
+    if (!sessao) {
+      enviarJson(requisicao, resposta, 401, { erro: "Sessão inválida ou expirada." });
+      return;
+    }
+
+    const rotaEventos = Boolean(correspondencia[2]);
+    if (!rotaEventos && requisicao.method === "DELETE") {
+      aplicarCabecalhosSeguranca(resposta);
+      resposta.writeHead(204, { "Cache-Control": "no-store" });
+      resposta.end();
+      desativarSessao(sessao);
+      return;
+    }
+
+    if (!rotaEventos) {
+      enviarJson(requisicao, resposta, 405, { erro: "Método não permitido." }, {
+        Allow: "DELETE",
+      });
+      return;
+    }
+
+    if (requisicao.method === "GET") {
+      const endereco = new URL(requisicao.url, "http://servidor.local");
+      if ([...endereco.searchParams.keys()].some((chave) => chave !== "desde")) {
+        enviarJson(requisicao, resposta, 400, { erro: "Consulta inválida." });
+        return;
+      }
+      const cursor = interpretarCursor(endereco.searchParams.get("desde"));
+      if (cursor === null || cursor > sessao.ultimoEventoId) {
+        enviarJson(requisicao, resposta, 400, { erro: "Cursor de eventos inválido." });
+        return;
+      }
+      responderComEventos(requisicao, resposta, sessao, cursor);
+      return;
+    }
+
+    if (requisicao.method !== "POST") {
+      enviarJson(requisicao, resposta, 405, { erro: "Método não permitido." }, {
+        Allow: "GET, POST",
+      });
+      return;
+    }
+
+    const tipoConteudo = String(
+      requisicao.headers["content-type"] || "",
+    ).split(";", 1)[0].trim().toLowerCase();
+    if (tipoConteudo !== "application/json") {
+      enviarErro(sessao.jogador, "Os eventos devem ser enviados como JSON.");
+      responderComEventos(requisicao, resposta, sessao, 0, 415);
+      return;
+    }
+
+    let corpo;
+    try {
+      corpo = await lerCorpoJson(requisicao);
+    } catch (erro) {
+      enviarErro(sessao.jogador, erro.message);
+      responderComEventos(
+        requisicao,
+        resposta,
+        sessao,
+        0,
+        erro.codigoHttp || 400,
+      );
+      return;
+    }
+
+    const cursor = interpretarCursor(corpo?.desde);
+    if (
+      cursor === null ||
+      cursor > sessao.ultimoEventoId ||
+      !ehObjetoSimples(corpo) ||
+      !possuiSomenteCampos(corpo, ["tipo", "dados", "desde"])
+    ) {
+      enviarErro(sessao.jogador, "A requisição de evento é inválida.");
+      responderComEventos(requisicao, resposta, sessao, 0, 400);
+      return;
+    }
+
+    const codigoHttp = receberEvento(sessao.jogador, {
+      tipo: corpo.tipo,
+      dados: corpo.dados,
+    });
+    responderComEventos(requisicao, resposta, sessao, cursor, codigoHttp);
+  }
+
+  const intervaloLimpeza = Math.min(
+    INTERVALO_LIMPEZA_SESSOES,
+    Math.max(25, Math.floor(tempoInatividadeSessao / 2)),
+  );
+  const verificadorDeSessoes = setInterval(() => {
+    const agora = Date.now();
+    for (const sessao of sessoes.values()) {
+      if (agora - sessao.ultimaAtividade >= tempoInatividadeSessao) {
+        desativarSessao(sessao);
       }
     }
-  }, INTERVALO_VERIFICACAO_CONEXAO);
-  verificadorDeConexoes.unref();
+  }, intervaloLimpeza);
+  verificadorDeSessoes.unref();
 
   function iniciar() {
     if (encerrado) {
@@ -1244,7 +1561,7 @@ function criarServidor({
 
       servidorHttp.once("error", falhou);
       servidorHttp.once("listening", iniciou);
-      servidorHttp.listen(portaConfigurada);
+      servidorHttp.listen(portaConfigurada, host.trim());
     });
 
     return promessaDeInicio;
@@ -1256,11 +1573,14 @@ function criarServidor({
     }
 
     encerrado = true;
-    clearInterval(verificadorDeConexoes);
+    clearInterval(verificadorDeSessoes);
     for (const sala of salas.values()) {
       for (const jogador of sala.jogadores) {
         limparPrazoReconexao(jogador);
       }
+    }
+    for (const sessao of sessoes.values()) {
+      desativarSessao(sessao, { agendarReconexao: false });
     }
 
     promessaDeEncerramento = (async () => {
@@ -1273,27 +1593,18 @@ function criarServidor({
       }
 
       if (!servidorHttp.listening) {
-        for (const conexao of servidorWebSocket.clients) {
-          conexao.terminate();
-        }
         return;
       }
 
       await new Promise((resolver) => {
         const temporizador = setTimeout(() => {
-          for (const conexao of servidorWebSocket.clients) {
-            conexao.terminate();
-          }
+          servidorHttp.closeAllConnections?.();
         }, 500);
 
-        servidorWebSocket.close(() => {
+        servidorHttp.close(() => {
           clearTimeout(temporizador);
-          servidorHttp.close(() => resolver());
+          resolver();
         });
-
-        for (const conexao of servidorWebSocket.clients) {
-          conexao.close(1001, "Servidor encerrado.");
-        }
       });
     })();
 
@@ -1304,7 +1615,6 @@ function criarServidor({
     encerrar,
     iniciar,
     servidorHttp,
-    servidorWebSocket,
   });
 }
 
@@ -1313,6 +1623,9 @@ async function iniciarPeloTerminal() {
   const endereco = await aplicacao.iniciar();
   const porta = typeof endereco === "object" ? endereco.port : endereco;
   console.log(`IFighters disponível em http://localhost:${porta}`);
+  for (const enderecoRede of listarEnderecosDaRede(porta)) {
+    console.log(`Na mesma rede: ${enderecoRede}`);
+  }
 
   let encerramentoSolicitado = false;
   async function encerrarProcesso() {

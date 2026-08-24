@@ -1,19 +1,18 @@
 # IFighters
 
-IFighters é um jogo web de batalhas por turnos com seleção de personagens, partida local e multiplayer em tempo real por WebSocket. A interface preserva a identidade visual inspirada em jogos de luta e foi preparada para teclado, toque, diferentes tamanhos de tela e preferências de acessibilidade.
+IFighters é um jogo web de batalhas por turnos com seleção de personagens, partida local e multiplayer pela rede local. A interface preserva a identidade visual inspirada em jogos de luta e foi preparada para teclado, toque, diferentes tamanhos de tela e preferências de acessibilidade.
 
 ## Requisitos
 
 - Node.js 20 ou mais recente.
 - npm, incluído na instalação do Node.js.
-- Um navegador moderno com suporte a WebSocket.
+- Um navegador moderno com suporte à API `fetch`.
 
 ## Instalação e execução
 
-No terminal, dentro da pasta do projeto, instale as dependências e inicie o servidor:
+O projeto não depende de pacotes externos. No terminal, dentro da pasta, inicie o servidor:
 
 ```bash
-npm install
 npm start
 ```
 
@@ -36,12 +35,10 @@ PORT=4000 npm start
 
 | Comando | Finalidade |
 | --- | --- |
-| `npm start` | Inicia o servidor HTTP e WebSocket. |
+| `npm start` | Inicia o servidor HTTP da interface e das partidas. |
 | `npm run dev` | Inicia o servidor em modo de desenvolvimento e reinicia após alterações. |
 | `npm run verificar` | Verifica a sintaxe dos arquivos JavaScript do cliente, dos dados, das regras, do protocolo e do servidor. |
 | `npm test` | Executa a verificação de sintaxe e todos os testes da pasta `testes/` com `node:test`. |
-
-Em ambientes automatizados, `npm ci` pode substituir `npm install` para reproduzir exatamente o conteúdo de `package-lock.json`.
 
 ## Como jogar
 
@@ -53,18 +50,18 @@ Em ambientes automatizados, `npm ci` pode substituir `npm install` para reproduz
 4. Em cada turno, escolha **Lutar** para abrir os quatro movimentos ou **Pokémon** para trocar o integrante ativo.
 5. A troca consome o turno e acontece antes dos golpes. A batalha termina somente quando os três integrantes de uma equipe forem derrotados.
 
-### Multiplayer em duas abas ou dispositivos
+### Multiplayer em duas abas ou dispositivos da mesma rede
 
-1. Mantenha uma única instância de `npm start` em execução.
-2. Abra `http://localhost:3000` em duas abas do navegador. Para jogar em dois dispositivos da mesma rede, abra `http://IP_DO_SERVIDOR:3000` nos dois e permita a porta no firewall, se necessário.
+1. Em um dos computadores, execute `npm start`. O terminal exibirá `http://localhost:3000` e os endereços disponíveis na rede local.
+2. Em duas abas, use `http://localhost:3000`. Em dispositivos diferentes, ambos devem abrir o mesmo endereço de rede mostrado no terminal, por exemplo `http://192.168.0.10:3000`. Permita a porta no firewall, se necessário.
 3. No primeiro cliente, escolha **Jogar**, **Multiplayer** e **Criar sala**.
 4. Copie o código exibido. No segundo cliente, informe esse código e escolha **Entrar**.
 5. Cada participante monta e confirma uma equipe de três IFighters. A equipe adversária permanece privada durante a seleção.
 6. Cada turno é resolvido depois que ambos escolhem um golpe ou uma troca. O servidor valida e resolve todas as ações.
-7. Se a conexão cair, o jogo tenta retomar a sessão autenticada por até 30 segundos sem perder vidas ou a ação pendente.
+7. O navegador consulta o servidor por HTTP em intervalos curtos. Se a comunicação cair, o jogo tenta retomar a sessão autenticada por até 30 segundos sem perder vidas ou a ação pendente.
 8. Ao final, os participantes podem solicitar uma revanche ou sair da sala.
 
-O servidor guarda as salas apenas em memória. Reiniciar o processo encerra as partidas e invalida os códigos existentes. Para dispositivos fora da rede local, publique o projeto atrás de HTTPS e use uma conexão WebSocket segura.
+O servidor guarda as salas apenas em memória. Reiniciar o processo encerra as partidas e invalida os códigos existentes. O servidor escuta em `0.0.0.0` por padrão para aceitar dispositivos da mesma rede; defina a variável `HOST` se quiser restringir a interface de rede.
 
 ## Controles
 
@@ -82,33 +79,46 @@ As preferências de animação, alto contraste e reprodução da introdução s�
 IFighters/
 ├── img/                 Imagens, sprites e vídeo da introdução
 ├── testes/              Testes automatizados com node:test
-├── app.js               Interface, navegação e cliente WebSocket
+├── app.js               Interface, navegação e cliente HTTP multiplayer
 ├── data.js              Catálogo compartilhado de IFighters e golpes
 ├── main.html            Estrutura semântica das telas
 ├── protocol.js          Eventos compartilhados do protocolo multiplayer
 ├── regras-batalha.js    Regras de dano, acerto e ordem usadas nos dois lados
-├── server.js            Servidor HTTP, salas e coordenação WebSocket
+├── server.js            Servidor HTTP, salas e coordenação das partidas
 └── style.css            Identidade visual, responsividade e acessibilidade
 ```
 
-O navegador carrega `data.js`, `protocol.js`, `regras-batalha.js` e `app.js`. Os módulos compartilhados também expõem seus dados ao Node.js, evitando versões diferentes das regras no cliente e no servidor. As funções de batalha aceitam uma fonte de aleatoriedade substituível, o que permite testar acertos e desempates de modo previsível. O servidor HTTP publica apenas os arquivos necessários para a aplicação e o servidor WebSocket coordena salas com dois participantes.
+O navegador carrega `data.js`, `protocol.js`, `regras-batalha.js` e `app.js`. Os módulos compartilhados também expõem seus dados ao Node.js, evitando versões diferentes das regras no cliente e no servidor. As funções de batalha aceitam uma fonte de aleatoriedade substituível, o que permite testar acertos e desempates de modo previsível. O mesmo servidor HTTP publica os arquivos do jogo e mantém o estado autoritativo das salas com dois participantes.
 
-## Protocolo multiplayer
+## API multiplayer pela rede local
 
-As mensagens WebSocket usam JSON com o envelope abaixo:
+As ações usam requisições HTTP com JSON. Não existe dependência de transporte persistente. Cada navegador cria uma sessão autenticada e consulta os eventos novos por polling curto.
+
+Endpoints principais:
+
+| Método | Endpoint | Uso |
+| --- | --- | --- |
+| `GET` | `/api/multijogador/status` | Informa versão, transporte e endereços da rede. |
+| `POST` | `/api/multijogador/sessoes` | Cria uma sessão temporária e devolve suas credenciais privadas. |
+| `GET` | `/api/multijogador/sessoes/:id/eventos?desde=:cursor` | Busca somente os eventos ainda não processados. |
+| `POST` | `/api/multijogador/sessoes/:id/eventos` | Envia uma ação ao servidor e recebe eventos pendentes. |
+| `DELETE` | `/api/multijogador/sessoes/:id` | Encerra a sessão HTTP. |
+
+O corpo de uma ação mantém o envelope compartilhado:
 
 ```json
 {
   "tipo": "nome_do_evento",
-  "dados": {}
+  "dados": {},
+  "desde": 12
 }
 ```
 
 Fluxo principal dos eventos:
 
-| Direção | Eventos | Uso |
+| Direção lógica | Eventos | Uso |
 | --- | --- | --- |
-| Servidor → cliente | `conexao` | Confirma a conexão e informa a identificação do cliente. |
+| Servidor → cliente | `conexao` | Confirma a sessão HTTP e informa a identificação do cliente. |
 | Cliente → servidor | `criar_sala` | Solicita uma sala nova. |
 | Servidor → cliente | `sala_criada` | Retorna o código da sala. |
 | Cliente → servidor | `entrar_sala` | Entra em uma sala usando o código recebido. |

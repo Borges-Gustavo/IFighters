@@ -1,7 +1,7 @@
 {
   "name": "ifighters",
   "version": "1.0.0",
-  "description": "Jogo web de batalhas por turnos entre IFighters, com modo local e multiplayer em tempo real.",
+  "description": "Jogo web de batalhas por turnos entre IFighters, com modo local e multiplayer pela rede local.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -17,7 +17,7 @@
     "jogo",
     "batalha",
     "multiplayer",
-    "websocket"
+    "rede-local"
   ],
   "author": "",
   "license": "ISC",
@@ -28,8 +28,5 @@
   "bugs": {
     "url": "https://github.com/Borges-Gustavo/IFighters/issues"
   },
-  "homepage": "https://github.com/Borges-Gustavo/IFighters#readme",
-  "dependencies": {
-    "ws": "^8.21.3"
-  }
+  "homepage": "https://github.com/Borges-Gustavo/IFighters#readme"
 }

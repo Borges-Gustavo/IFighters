@@ -106,8 +106,16 @@ function limparCredenciaisReconexao() {
 
 function criarEstadoMultijogador() {
   return {
-    soquete: null,
+    sessaoId: null,
+    chaveSessao: null,
     promessaConexao: null,
+    filaEnvio: Promise.resolve(),
+    pollingAtivo: false,
+    temporizadorPolling: null,
+    abortadorRequisicao: null,
+    intervaloPollingMs: 300,
+    ultimoEventoId: 0,
+    falhasConsecutivas: 0,
     situacao: "desconectado",
     jogadorId: null,
     codigoSala: null,
@@ -1562,13 +1570,118 @@ function definirControlesSalaHabilitados(habilitados) {
   });
 }
 
-function obterEnderecoMultijogador() {
+const CAMINHO_API_MULTIJOGADOR = "/api/multijogador";
+
+async function requisitarApiMultijogador(
+  caminho,
+  {
+    metodo = "GET",
+    corpo = null,
+    sessao = null,
+    sinal = undefined,
+    manterAoSair = false,
+  } = {},
+) {
   if (!window.location.host) {
     throw new Error("Abra o jogo pelo servidor Node para usar o multijogador.");
   }
 
-  const protocolo = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocolo}//${window.location.host}`;
+  const cabecalhos = { Accept: "application/json" };
+  if (corpo !== null) {
+    cabecalhos["Content-Type"] = "application/json";
+  }
+  if (sessao?.sessaoId && sessao?.chaveSessao) {
+    cabecalhos.Authorization = `Bearer ${sessao.chaveSessao}`;
+  }
+
+  const controlador = new AbortController();
+  const abortarPeloSinalExterno = () => controlador.abort();
+  if (sinal?.aborted) {
+    controlador.abort();
+  } else {
+    sinal?.addEventListener("abort", abortarPeloSinalExterno, { once: true });
+  }
+  const temporizador = window.setTimeout(
+    () => controlador.abort(),
+    DURACOES.conexao,
+  );
+
+  try {
+    const resposta = await fetch(caminho, {
+      body: corpo === null ? undefined : JSON.stringify(corpo),
+      cache: "no-store",
+      headers: cabecalhos,
+      keepalive: manterAoSair,
+      method: metodo,
+      signal: controlador.signal,
+    });
+    const texto = await resposta.text();
+    let dados = {};
+
+    if (texto) {
+      try {
+        dados = JSON.parse(texto);
+      } catch {
+        throw new Error("O servidor enviou uma resposta ilegível.");
+      }
+    }
+
+    if (!resposta.ok) {
+      const erro = new Error(
+        typeof dados.erro === "string"
+          ? dados.erro
+          : "O servidor recusou a solicitação.",
+      );
+      erro.codigoHttp = resposta.status;
+      erro.dados = dados;
+      throw erro;
+    }
+
+    return dados;
+  } finally {
+    clearTimeout(temporizador);
+    sinal?.removeEventListener("abort", abortarPeloSinalExterno);
+  }
+}
+
+function validarLoteEventos(sessao, lote) {
+  if (
+    !ehObjeto(lote) ||
+    !Array.isArray(lote.eventos) ||
+    lote.eventosPerdidos === true
+  ) {
+    throw new Error("A sincronização da partida ficou incompleta.");
+  }
+
+  for (const mensagem of lote.eventos) {
+    if (
+      !ehObjeto(mensagem) ||
+      !Number.isSafeInteger(mensagem.id) ||
+      mensagem.id <= 0 ||
+      typeof mensagem.tipo !== "string" ||
+      !Object.values(EVENTOS).includes(mensagem.tipo) ||
+      (mensagem.dados !== undefined && !ehObjeto(mensagem.dados))
+    ) {
+      throw new Error("O servidor enviou um evento fora do protocolo.");
+    }
+
+    if (mensagem.id <= sessao.ultimoEventoId) {
+      continue;
+    }
+
+    sessao.ultimoEventoId = mensagem.id;
+    tratarEventoMultijogador(mensagem.tipo, mensagem.dados ?? {});
+  }
+}
+
+function cancelarPolling(sessao = estadoAplicacao.multijogador) {
+  sessao.pollingAtivo = false;
+  if (sessao.temporizadorPolling !== null) {
+    clearTimeout(sessao.temporizadorPolling);
+    sessao.temporizadorPolling = null;
+  }
+  sessao.abortadorRequisicao?.abort();
+  sessao.abortadorRequisicao = null;
 }
 
 function cancelarTemporizadorReconexao() {
@@ -1617,8 +1730,8 @@ async function retomarMultijogador() {
   }
 }
 
-function manipularFechamentoSoquete(soquete) {
-  if (estadoAplicacao.multijogador.soquete !== soquete) {
+function manipularPerdaDaSessao(sessao) {
+  if (estadoAplicacao.multijogador !== sessao) {
     return;
   }
 
@@ -1626,7 +1739,9 @@ function manipularFechamentoSoquete(soquete) {
   const estavaEmFluxoMultijogador =
     estadoAplicacao.modoBatalha === "multijogador";
 
-  multijogador.soquete = null;
+  cancelarPolling(multijogador);
+  multijogador.sessaoId = null;
+  multijogador.chaveSessao = null;
   multijogador.promessaConexao = null;
 
   if (
@@ -1663,104 +1778,237 @@ function manipularFechamentoSoquete(soquete) {
 }
 
 async function conectarMultijogador() {
-  if (!("WebSocket" in window)) {
-    throw new Error("Este navegador não oferece suporte ao multijogador.");
+  const multijogador = estadoAplicacao.multijogador;
+  if (multijogador.sessaoId && multijogador.chaveSessao) {
+    return multijogador;
   }
 
-  const conexaoAtual = estadoAplicacao.multijogador.soquete;
-
-  if (conexaoAtual?.readyState === WebSocket.OPEN) {
-    return conexaoAtual;
+  if (multijogador.promessaConexao) {
+    return multijogador.promessaConexao;
   }
 
-  if (estadoAplicacao.multijogador.promessaConexao) {
-    return estadoAplicacao.multijogador.promessaConexao;
-  }
-
-  const soquete = new WebSocket(obterEnderecoMultijogador());
-  estadoAplicacao.multijogador.soquete = soquete;
-  estadoAplicacao.multijogador.situacao = "conectando";
-
-  soquete.addEventListener("message", manipularMensagemMultijogador);
-  soquete.addEventListener("close", () => manipularFechamentoSoquete(soquete));
-
-  const promessa = new Promise((resolver, rejeitar) => {
-    const temporizador = window.setTimeout(() => {
-      rejeitar(new Error("O servidor demorou demais para responder."));
-      soquete.close();
-    }, DURACOES.conexao);
-
-    soquete.addEventListener(
-      "open",
-      () => {
-        clearTimeout(temporizador);
-
-        if (estadoAplicacao.multijogador.soquete !== soquete) {
-          soquete.close(1000, "Conexão cancelada pelo jogador");
-          rejeitar(new Error("A conexão foi cancelada."));
-          return;
-        }
-
-        estadoAplicacao.multijogador.situacao = "conectado";
-        resolver(soquete);
-      },
-      { once: true },
+  multijogador.situacao = "conectando";
+  const promessa = (async () => {
+    const resposta = await requisitarApiMultijogador(
+      `${CAMINHO_API_MULTIJOGADOR}/sessoes`,
+      { metodo: "POST" },
     );
-    soquete.addEventListener(
-      "error",
-      () => {
-        clearTimeout(temporizador);
-        rejeitar(new Error("Não foi possível conectar ao servidor."));
-      },
-      { once: true },
-    );
-  });
+    if (
+      typeof resposta.sessaoId !== "string" ||
+      typeof resposta.chaveSessao !== "string" ||
+      !Array.isArray(resposta.eventos)
+    ) {
+      throw new Error("O servidor não criou uma sessão válida.");
+    }
 
-  estadoAplicacao.multijogador.promessaConexao = promessa;
+    if (estadoAplicacao.multijogador !== multijogador) {
+      void encerrarSessaoRemota({
+        chaveSessao: resposta.chaveSessao,
+        sessaoId: resposta.sessaoId,
+      });
+      throw new Error("A conexão foi cancelada.");
+    }
+
+    Object.assign(multijogador, {
+      chaveSessao: resposta.chaveSessao,
+      falhasConsecutivas: 0,
+      filaEnvio: Promise.resolve(),
+      intervaloPollingMs: Number.isInteger(resposta.intervaloPollingMs)
+        ? limitarNumero(resposta.intervaloPollingMs, 150, 2_000)
+        : 300,
+      pollingAtivo: true,
+      sessaoId: resposta.sessaoId,
+      situacao: "conectado",
+      ultimoEventoId: 0,
+    });
+    validarLoteEventos(multijogador, resposta);
+    agendarPolling(multijogador, 0);
+    return multijogador;
+  })();
+
+  multijogador.promessaConexao = promessa;
 
   try {
     return await promessa;
+  } catch (erro) {
+    if (estadoAplicacao.multijogador === multijogador) {
+      cancelarPolling(multijogador);
+      void encerrarSessaoRemota(multijogador);
+      multijogador.sessaoId = null;
+      multijogador.chaveSessao = null;
+    }
+    throw erro;
   } finally {
-    if (estadoAplicacao.multijogador.promessaConexao === promessa) {
-      estadoAplicacao.multijogador.promessaConexao = null;
+    if (multijogador.promessaConexao === promessa) {
+      multijogador.promessaConexao = null;
+    }
+  }
+}
+
+function agendarPolling(sessao, atraso = sessao.intervaloPollingMs) {
+  if (
+    estadoAplicacao.multijogador !== sessao ||
+    !sessao.pollingAtivo ||
+    sessao.temporizadorPolling !== null
+  ) {
+    return;
+  }
+
+  sessao.temporizadorPolling = window.setTimeout(() => {
+    sessao.temporizadorPolling = null;
+    void consultarEventosMultijogador(sessao);
+  }, atraso);
+}
+
+async function consultarEventosMultijogador(sessao) {
+  if (
+    estadoAplicacao.multijogador !== sessao ||
+    !sessao.pollingAtivo ||
+    !sessao.sessaoId
+  ) {
+    return;
+  }
+
+  const controlador = new AbortController();
+  sessao.abortadorRequisicao = controlador;
+  try {
+    const resposta = await requisitarApiMultijogador(
+      `${CAMINHO_API_MULTIJOGADOR}/sessoes/${sessao.sessaoId}` +
+        `/eventos?desde=${sessao.ultimoEventoId}`,
+      { sessao, sinal: controlador.signal },
+    );
+    validarLoteEventos(sessao, resposta);
+    sessao.falhasConsecutivas = 0;
+  } catch (erro) {
+    if (controlador.signal.aborted || estadoAplicacao.multijogador !== sessao) {
+      return;
+    }
+
+    sessao.falhasConsecutivas += 1;
+    if (erro?.codigoHttp === 401 || sessao.falhasConsecutivas >= 3) {
+      manipularPerdaDaSessao(sessao);
+      return;
+    }
+  } finally {
+    if (sessao.abortadorRequisicao === controlador) {
+      sessao.abortadorRequisicao = null;
+    }
+  }
+
+  agendarPolling(
+    sessao,
+    sessao.falhasConsecutivas
+      ? Math.min(sessao.intervaloPollingMs * 3, 2_000)
+      : sessao.intervaloPollingMs,
+  );
+}
+
+async function enviarEventoHttp(sessao, tipo, dados) {
+  try {
+    const resposta = await requisitarApiMultijogador(
+      `${CAMINHO_API_MULTIJOGADOR}/sessoes/${sessao.sessaoId}/eventos`,
+      {
+        corpo: { dados, desde: sessao.ultimoEventoId, tipo },
+        metodo: "POST",
+        sessao,
+      },
+    );
+    if (estadoAplicacao.multijogador !== sessao) {
+      return;
+    }
+    validarLoteEventos(sessao, resposta);
+    sessao.falhasConsecutivas = 0;
+  } catch (erro) {
+    if (
+      estadoAplicacao.multijogador === sessao &&
+      ehObjeto(erro?.dados) &&
+      Array.isArray(erro.dados.eventos)
+    ) {
+      try {
+        validarLoteEventos(sessao, erro.dados);
+      } catch {
+        // A falha original continua sendo a informação mais útil.
+      }
+    }
+
+    if (erro?.codigoHttp === 401) {
+      manipularPerdaDaSessao(sessao);
+    } else if (!Number.isInteger(erro?.codigoHttp)) {
+      sessao.falhasConsecutivas += 1;
     }
   }
 }
 
 function enviarEvento(tipo, dados = {}) {
-  const soquete = estadoAplicacao.multijogador.soquete;
+  const sessao = estadoAplicacao.multijogador;
 
-  if (!soquete || soquete.readyState !== WebSocket.OPEN) {
+  if (!sessao.sessaoId || !sessao.chaveSessao) {
     mostrarAviso("A conexão com o servidor não está disponível.");
     return false;
   }
 
+  sessao.filaEnvio = sessao.filaEnvio.then(() =>
+    enviarEventoHttp(sessao, tipo, dados),
+  );
+  return true;
+}
+
+async function encerrarSessaoRemota(sessao, { manterAoSair = false } = {}) {
+  if (!sessao?.sessaoId || !sessao?.chaveSessao) {
+    return;
+  }
+
   try {
-    soquete.send(JSON.stringify({ tipo, dados }));
-    return true;
+    await requisitarApiMultijogador(
+      `${CAMINHO_API_MULTIJOGADOR}/sessoes/${sessao.sessaoId}`,
+      {
+        manterAoSair,
+        metodo: "DELETE",
+        sessao,
+      },
+    );
   } catch {
-    mostrarAviso("Não foi possível enviar a solicitação ao servidor.");
-    return false;
+    // O servidor também expira sessões que deixam de fazer polling.
+  }
+}
+
+async function sairEEncerrarSessao(sessao) {
+  try {
+    await requisitarApiMultijogador(
+      `${CAMINHO_API_MULTIJOGADOR}/sessoes/${sessao.sessaoId}/eventos`,
+      {
+        corpo: {
+          dados: {},
+          desde: sessao.ultimoEventoId,
+          tipo: EVENTOS.SAIR_SALA,
+        },
+        metodo: "POST",
+        sessao,
+      },
+    );
+  } catch {
+    // A expiração da sessão também libera a sala se o aviso falhar.
+  } finally {
+    await encerrarSessaoRemota(sessao);
   }
 }
 
 function desconectarMultijogador(
   { avisarServidor = true, preservarCredenciais = false } = {},
 ) {
-  const soquete = estadoAplicacao.multijogador.soquete;
+  const sessao = estadoAplicacao.multijogador;
 
   cancelarTemporizadorReconexao();
+  cancelarPolling(sessao);
 
   if (
     avisarServidor &&
     estadoAplicacao.multijogador.codigoSala &&
-    soquete?.readyState === WebSocket.OPEN
+    sessao.sessaoId
   ) {
-    try {
-      soquete.send(JSON.stringify({ tipo: EVENTOS.SAIR_SALA, dados: {} }));
-    } catch {
-      // O fechamento abaixo conclui a limpeza local mesmo sem envio.
-    }
+    void sairEEncerrarSessao(sessao);
+  } else {
+    void encerrarSessaoRemota(sessao);
   }
 
   if (!preservarCredenciais) {
@@ -1768,10 +2016,6 @@ function desconectarMultijogador(
   }
 
   estadoAplicacao.multijogador = criarEstadoMultijogador();
-
-  if (soquete && soquete.readyState < WebSocket.CLOSING) {
-    soquete.close(1000, "Saída solicitada pelo jogador");
-  }
 }
 
 async function abrirMultijogador() {
@@ -1779,14 +2023,14 @@ async function abrirMultijogador() {
   estadoAplicacao.modoBatalha = "multijogador";
   mostrarEsperaSala("Conectando…");
   irParaTela("multijogador");
+  const sessaoEsperada = estadoAplicacao.multijogador;
   const promessaConexao = conectarMultijogador();
-  const soqueteEsperado = estadoAplicacao.multijogador.soquete;
 
   try {
-    const soquete = await promessaConexao;
+    const sessao = await promessaConexao;
 
     if (
-      estadoAplicacao.multijogador.soquete !== soquete ||
+      estadoAplicacao.multijogador !== sessao ||
       estadoAplicacao.telaAtual !== "multijogador"
     ) {
       return;
@@ -1796,7 +2040,7 @@ async function abrirMultijogador() {
   } catch (erro) {
     if (
       estadoAplicacao.modoBatalha !== "multijogador" ||
-      estadoAplicacao.multijogador.soquete !== soqueteEsperado
+      estadoAplicacao.multijogador !== sessaoEsperada
     ) {
       return;
     }
@@ -1808,13 +2052,13 @@ async function abrirMultijogador() {
 
 async function criarSala() {
   definirControlesSalaHabilitados(false);
+  const sessaoEsperada = estadoAplicacao.multijogador;
   const promessaConexao = conectarMultijogador();
-  const soqueteEsperado = estadoAplicacao.multijogador.soquete;
 
   try {
-    const soquete = await promessaConexao;
+    const sessao = await promessaConexao;
 
-    if (estadoAplicacao.multijogador.soquete !== soquete) {
+    if (estadoAplicacao.multijogador !== sessao) {
       return;
     }
 
@@ -1826,7 +2070,7 @@ async function criarSala() {
   } catch (erro) {
     if (
       estadoAplicacao.modoBatalha !== "multijogador" ||
-      estadoAplicacao.multijogador.soquete !== soqueteEsperado
+      estadoAplicacao.multijogador !== sessaoEsperada
     ) {
       return;
     }
@@ -1850,13 +2094,13 @@ async function entrarSala() {
 
   campoCodigo.removeAttribute("aria-invalid");
   definirControlesSalaHabilitados(false);
+  const sessaoEsperada = estadoAplicacao.multijogador;
   const promessaConexao = conectarMultijogador();
-  const soqueteEsperado = estadoAplicacao.multijogador.soquete;
 
   try {
-    const soquete = await promessaConexao;
+    const sessao = await promessaConexao;
 
-    if (estadoAplicacao.multijogador.soquete !== soquete) {
+    if (estadoAplicacao.multijogador !== sessao) {
       return;
     }
 
@@ -1868,7 +2112,7 @@ async function entrarSala() {
   } catch (erro) {
     if (
       estadoAplicacao.modoBatalha !== "multijogador" ||
-      estadoAplicacao.multijogador.soquete !== soqueteEsperado
+      estadoAplicacao.multijogador !== sessaoEsperada
     ) {
       return;
     }
@@ -2359,13 +2603,12 @@ function tratarErroSala(dados) {
       : "O servidor recusou a solicitação.";
 
   if (estadoAplicacao.multijogador.reconectando) {
-    const soquete = estadoAplicacao.multijogador.soquete;
-    estadoAplicacao.multijogador.soquete = null;
-    estadoAplicacao.multijogador.promessaConexao = null;
-
-    if (soquete && soquete.readyState < WebSocket.CLOSING) {
-      soquete.close(1000, "Nova tentativa de retomada");
-    }
+    const sessao = estadoAplicacao.multijogador;
+    cancelarPolling(sessao);
+    void encerrarSessaoRemota(sessao);
+    sessao.sessaoId = null;
+    sessao.chaveSessao = null;
+    sessao.promessaConexao = null;
 
     agendarReconexao();
     mostrarAviso(mensagem);
@@ -2398,7 +2641,7 @@ function tratarEventoMultijogador(tipo, dados) {
       !dados.jogadorId ||
       typeof dados.tokenReconexao !== "string" ||
       dados.tokenReconexao.length < 32 ||
-      dados.versaoProtocolo !== 2
+      dados.versaoProtocolo !== 3
     ) {
       mostrarAviso("O servidor enviou uma identificação inválida.");
       return;
@@ -2503,34 +2746,6 @@ function tratarEventoMultijogador(tipo, dados) {
   if (tipo === EVENTOS.ERRO_SALA) {
     tratarErroSala(dados);
   }
-}
-
-function manipularMensagemMultijogador(evento) {
-  if (typeof evento.data !== "string" || evento.data.length > 100_000) {
-    mostrarAviso("O servidor enviou uma mensagem inválida.");
-    return;
-  }
-
-  let mensagem;
-
-  try {
-    mensagem = JSON.parse(evento.data);
-  } catch {
-    mostrarAviso("O servidor enviou uma mensagem ilegível.");
-    return;
-  }
-
-  if (
-    !ehObjeto(mensagem) ||
-    typeof mensagem.tipo !== "string" ||
-    !Object.values(EVENTOS).includes(mensagem.tipo) ||
-    (mensagem.dados !== undefined && !ehObjeto(mensagem.dados))
-  ) {
-    mostrarAviso("O servidor enviou uma mensagem fora do protocolo.");
-    return;
-  }
-
-  tratarEventoMultijogador(mensagem.tipo, mensagem.dados ?? {});
 }
 
 function sairDaBatalha() {
@@ -2893,11 +3108,9 @@ function registrarEventos() {
 
   window.addEventListener("pagehide", () => {
     salvarCredenciaisReconexao();
-    const soquete = estadoAplicacao.multijogador.soquete;
-
-    if (soquete && soquete.readyState < WebSocket.CLOSING) {
-      soquete.close(1001, "Página recarregada");
-    }
+    const sessao = estadoAplicacao.multijogador;
+    cancelarPolling(sessao);
+    void encerrarSessaoRemota(sessao, { manterAoSair: true });
 
     cancelarTurnoLocal();
   });

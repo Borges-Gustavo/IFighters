@@ -125,10 +125,14 @@ test("a introdução continua sendo a tela inicial automática", () => {
   );
 });
 
-test("o cliente preserva e retoma sessões WebSocket interrompidas", () => {
+test("o cliente sincroniza por HTTP e retoma sessões interrompidas", () => {
+  assert.match(APP, /const CAMINHO_API_MULTIJOGADOR/);
+  assert.match(APP, /fetch\(caminho/);
+  assert.match(APP, /function consultarEventosMultijogador/);
   assert.match(APP, /sessionStorage\.setItem\(\s*CHAVE_RECONEXAO/);
   assert.match(APP, /EVENTOS\.REENTRAR_SALA/);
   assert.match(APP, /EVENTOS\.SALA_REENTRADA/);
   assert.match(APP, /EVENTOS\.OPONENTE_RECONECTADO/);
   assert.match(APP, /dados\?\.temporario === true/);
+  assert.doesNotMatch(APP, /\bwss?:/i);
 });

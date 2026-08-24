@@ -1,8 +1,6 @@
 const assert = require("node:assert/strict");
 const http = require("node:http");
-const { once } = require("node:events");
 const test = require("node:test");
-const WebSocket = require("ws");
 
 const LUTADORES = require("../data");
 const EVENTOS = require("../protocol");
@@ -10,7 +8,13 @@ const { criarServidor } = require("../server");
 
 const TEMPO_LIMITE = 2_000;
 
-function requisitar(porta, caminho, metodo = "GET", cabecalhos = {}) {
+function requisitar(
+  porta,
+  caminho,
+  metodo = "GET",
+  cabecalhos = {},
+  corpo = null,
+) {
   return new Promise((resolver, rejeitar) => {
     const requisicao = http.request(
       {
@@ -37,13 +41,21 @@ function requisitar(porta, caminho, metodo = "GET", cabecalhos = {}) {
     );
 
     requisicao.on("error", rejeitar);
+    if (corpo !== null) {
+      requisicao.write(corpo);
+    }
     requisicao.end();
   });
+}
+
+function interpretarJson(resposta) {
+  return resposta.corpo ? JSON.parse(resposta.corpo) : {};
 }
 
 async function iniciarAplicacao(contexto, opcoes = {}) {
   const aplicacao = criarServidor({
     aleatorio: () => 0,
+    host: "127.0.0.1",
     porta: 0,
     ...opcoes,
   });
@@ -56,79 +68,128 @@ async function iniciarAplicacao(contexto, opcoes = {}) {
 }
 
 async function conectarCliente(contexto, porta) {
-  const conexao = new WebSocket(`ws://127.0.0.1:${porta}`);
+  const criacao = await requisitar(
+    porta,
+    "/api/multijogador/sessoes",
+    "POST",
+  );
+  assert.equal(criacao.codigo, 201);
+  const credenciais = interpretarJson(criacao);
+  assert.match(credenciais.sessaoId, /^[\w-]{43}$/);
+  assert.match(credenciais.chaveSessao, /^[\w-]{43}$/);
+
   const fila = [];
-  const esperas = [];
+  let ultimoEventoId = 0;
+  let filaEnvio = Promise.resolve();
+  let fechada = false;
 
-  conexao.on("message", (conteudo) => {
-    const mensagem = JSON.parse(conteudo.toString("utf8"));
-    const indiceEspera = esperas.findIndex(
-      (espera) => !espera.tipo || espera.tipo === mensagem.tipo,
-    );
+  const cabecalhosAutenticados = {
+    Authorization: `Bearer ${credenciais.chaveSessao}`,
+  };
 
-    if (indiceEspera === -1) {
-      fila.push(mensagem);
-      return;
+  function absorverEventos(resposta) {
+    const dados = interpretarJson(resposta);
+    for (const evento of dados.eventos || []) {
+      if (evento.id <= ultimoEventoId) {
+        continue;
+      }
+      ultimoEventoId = evento.id;
+      fila.push({ dados: evento.dados, tipo: evento.tipo });
     }
-
-    const [espera] = esperas.splice(indiceEspera, 1);
-    clearTimeout(espera.temporizador);
-    espera.resolver(mensagem);
-  });
-
-  await once(conexao, "open");
-
-  function receber(tipo, tempoLimite = TEMPO_LIMITE) {
-    const indiceMensagem = fila.findIndex(
-      (mensagem) => !tipo || mensagem.tipo === tipo,
-    );
-    if (indiceMensagem !== -1) {
-      return Promise.resolve(fila.splice(indiceMensagem, 1)[0]);
-    }
-
-    return new Promise((resolver, rejeitar) => {
-      const espera = {
-        rejeitar,
-        resolver,
-        tipo,
-        temporizador: setTimeout(() => {
-          const indice = esperas.indexOf(espera);
-          if (indice !== -1) {
-            esperas.splice(indice, 1);
-          }
-          rejeitar(
-            new Error(`Tempo esgotado aguardando o evento ${tipo || "seguinte"}.`),
-          );
-        }, tempoLimite),
-      };
-      esperas.push(espera);
-    });
+    return resposta;
   }
 
   function enviar(tipo, dados = {}) {
-    conexao.send(JSON.stringify({ tipo, dados }));
+    return enviarConteudo(JSON.stringify({
+      dados,
+      desde: ultimoEventoId,
+      tipo,
+    }));
   }
 
-  function enviarConteudo(conteudo) {
-    conexao.send(conteudo);
+  function enviarConteudo(conteudo, tipoConteudo = "application/json") {
+    filaEnvio = filaEnvio.then(async () => {
+      const resposta = await requisitar(
+        porta,
+        `/api/multijogador/sessoes/${credenciais.sessaoId}/eventos`,
+        "POST",
+        {
+          ...cabecalhosAutenticados,
+          "Content-Type": tipoConteudo,
+        },
+        conteudo,
+      );
+      absorverEventos(resposta);
+      return resposta;
+    });
+    return filaEnvio;
+  }
+
+  async function atualizarEventos() {
+    await filaEnvio;
+    const resposta = await requisitar(
+      porta,
+      `/api/multijogador/sessoes/${credenciais.sessaoId}/eventos?desde=${ultimoEventoId}`,
+      "GET",
+      cabecalhosAutenticados,
+    );
+    assert.equal(resposta.codigo, 200);
+    absorverEventos(resposta);
+  }
+
+  async function receber(tipo, tempoLimite = TEMPO_LIMITE) {
+    const limite = Date.now() + tempoLimite;
+    while (Date.now() < limite) {
+      const indiceMensagem = fila.findIndex(
+        (mensagem) => !tipo || mensagem.tipo === tipo,
+      );
+      if (indiceMensagem !== -1) {
+        return fila.splice(indiceMensagem, 1)[0];
+      }
+
+      await atualizarEventos();
+      if (!fila.length) {
+        await new Promise((resolver) => setTimeout(resolver, 10));
+      }
+    }
+
+    throw new Error(
+      `Tempo esgotado aguardando o evento ${tipo || "seguinte"}.`,
+    );
   }
 
   async function fechar() {
-    if (conexao.readyState === WebSocket.CLOSED) {
+    if (fechada) {
       return;
     }
-
-    const fechou = once(conexao, "close");
-    if (conexao.readyState === WebSocket.OPEN) {
-      conexao.close();
-    } else {
-      conexao.terminate();
+    fechada = true;
+    await filaEnvio;
+    try {
+      await requisitar(
+        porta,
+        `/api/multijogador/sessoes/${credenciais.sessaoId}`,
+        "DELETE",
+        cabecalhosAutenticados,
+      );
+    } catch {
+      // O encerramento global do servidor pode ocorrer antes da limpeza do teste.
     }
-    await fechou;
+  }
+
+  function abandonar() {
+    fechada = true;
   }
 
   contexto.after(fechar);
-  return { conexao, enviar, enviarConteudo, fechar, receber };
+  absorverEventos(criacao);
+  return {
+    abandonar,
+    credenciais,
+    enviar,
+    enviarConteudo,
+    fechar,
+    receber,
+  };
 }
 
 const EQUIPES = Object.freeze({
@@ -201,6 +262,15 @@ async function enviarAcoes(primeiro, acaoPrimeiro, segundo, acaoSegundo) {
   return resultadoPrimeiro;
 }
 
+test("o servidor escuta a rede local por padrão", async (contexto) => {
+  const aplicacao = criarServidor({ porta: 0 });
+  contexto.after(() => aplicacao.encerrar());
+  const endereco = await aplicacao.iniciar();
+
+  assert.equal(endereco.address, "0.0.0.0");
+  assert.equal(endereco.family, "IPv4");
+});
+
 test("o HTTP entrega apenas recursos públicos e trata caminhos hostis", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
 
@@ -214,6 +284,10 @@ test("o HTTP entrega apenas recursos públicos e trata caminhos hostis", async (
   assert.doesNotMatch(
     pagina.cabecalhos["content-security-policy"],
     /unsafe-inline/,
+  );
+  assert.doesNotMatch(
+    pagina.cabecalhos["content-security-policy"],
+    /\bwss?:/,
   );
 
   const cabecalho = await requisitar(porta, "/style.css", "HEAD");
@@ -268,25 +342,80 @@ test("o HTTP entrega apenas recursos públicos e trata caminhos hostis", async (
   assert.equal(metodoInvalido.corpo, "Método não permitido.");
 });
 
-test("o handshake WebSocket rejeita origem de outro site", async (contexto) => {
+test("a API cria sessões HTTP autenticadas e informa a rede local", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
-  const conexao = new WebSocket(`ws://127.0.0.1:${porta}`, {
-    origin: "https://site-malicioso.invalid",
-  });
-  contexto.after(() => conexao.terminate());
+  const status = await requisitar(porta, "/api/multijogador/status");
+  assert.equal(status.codigo, 200);
+  assert.deepEqual(
+    {
+      transporte: interpretarJson(status).transporte,
+      versaoProtocolo: interpretarJson(status).versaoProtocolo,
+    },
+    { transporte: "http", versaoProtocolo: 3 },
+  );
+  assert.ok(Array.isArray(interpretarJson(status).enderecosRede));
 
-  const codigoHttp = await new Promise((resolver, rejeitar) => {
-    conexao.once("open", () => rejeitar(new Error("Origem hostil foi aceita.")));
-    conexao.once("error", () => {
-      // O erro acompanha a rejeição HTTP e não deve ficar sem observador.
-    });
-    conexao.once("unexpected-response", (_requisicao, resposta) => {
-      resposta.resume();
-      resolver(resposta.statusCode);
-    });
-  });
+  const criacao = await requisitar(
+    porta,
+    "/api/multijogador/sessoes",
+    "POST",
+  );
+  const sessao = interpretarJson(criacao);
+  const caminho = `/api/multijogador/sessoes/${sessao.sessaoId}/eventos`;
 
-  assert.equal(codigoHttp, 401);
+  assert.equal((await requisitar(porta, caminho)).codigo, 401);
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${"x".repeat(43)}`,
+      })
+    ).codigo,
+    401,
+  );
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${sessao.chaveSessao}`,
+      })
+    ).codigo,
+    200,
+  );
+  assert.equal(
+    (
+      await requisitar(porta, `${caminho}?desde=999`, "GET", {
+        Authorization: `Bearer ${sessao.chaveSessao}`,
+      })
+    ).codigo,
+    400,
+  );
+
+  const exclusao = await requisitar(
+    porta,
+    `/api/multijogador/sessoes/${sessao.sessaoId}`,
+    "DELETE",
+    { Authorization: `Bearer ${sessao.chaveSessao}` },
+  );
+  assert.equal(exclusao.codigo, 204);
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${sessao.chaveSessao}`,
+      })
+    ).codigo,
+    401,
+  );
+});
+
+test("a API multiplayer rejeita requisições de outra origem", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const resposta = await requisitar(
+    porta,
+    "/api/multijogador/sessoes",
+    "POST",
+    { Origin: "https://site-malicioso.invalid" },
+  );
+  assert.equal(resposta.codigo, 403);
+  assert.equal(interpretarJson(resposta).erro, "Origem não permitida.");
 });
 
 test("equipes trocam, lutam até o fim, reiniciam e saem", async (contexto) => {
@@ -298,7 +427,7 @@ test("equipes trocam, lutam até o fim, reiniciam e saem", async (contexto) => {
 
   assert.match(conexaoPrimeiro.jogadorId, /^[0-9a-f-]{36}$/i);
   assert.match(conexaoPrimeiro.tokenReconexao, /^[\w-]{43}$/);
-  assert.equal(conexaoPrimeiro.versaoProtocolo, 2);
+  assert.equal(conexaoPrimeiro.versaoProtocolo, 3);
   assert.notEqual(conexaoPrimeiro.jogadorId, conexaoSegundo.jogadorId);
   assert.match(preparada.codigo, /^[A-HJ-NP-Z2-9]{6}$/);
   assert.equal(preparada.estado.situacao, "batalha");
@@ -443,7 +572,7 @@ test("equipes trocam, lutam até o fim, reiniciam e saem", async (contexto) => {
   );
 });
 
-test("o WebSocket valida envelopes, equipes e ações sem corromper a sala", async (contexto) => {
+test("a API HTTP valida envelopes, equipes e ações sem corromper a sala", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
   const primeiro = await conectarCliente(contexto, porta);
   await primeiro.receber(EVENTOS.CONEXAO);
@@ -474,10 +603,13 @@ test("o WebSocket valida envelopes, equipes e ações sem corromper a sala", asy
     "Esse evento não pode ser enviado pelo cliente.",
   );
 
-  primeiro.enviarConteudo(Buffer.from("mensagem binária"));
+  primeiro.enviarConteudo(
+    Buffer.from("mensagem binária"),
+    "application/octet-stream",
+  );
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
-    "Mensagens binárias não são aceitas.",
+    "Os eventos devem ser enviados como JSON.",
   );
 
   primeiro.enviar(EVENTOS.CRIAR_SALA);
@@ -622,19 +754,22 @@ test("eventos fora de ordem são recusados sem alterar a sessão", async (contex
   );
 });
 
-test("o limite de mensagens encerra clientes abusivos", async (contexto) => {
+test("o limite de requisições bloqueia clientes abusivos", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
   const cliente = await conectarCliente(contexto, porta);
   await cliente.receber(EVENTOS.CONEXAO);
-  const fechamento = once(cliente.conexao, "close");
 
+  let ultimaResposta;
   for (let indice = 0; indice < 61; indice += 1) {
-    cliente.enviarConteudo("{}");
+    ultimaResposta = await cliente.enviarConteudo("{}");
   }
 
-  const [codigo, motivo] = await fechamento;
-  assert.equal(codigo, 1008);
-  assert.equal(motivo.toString("utf8"), "Limite de mensagens excedido.");
+  assert.equal(ultimaResposta.codigo, 429);
+  const eventos = interpretarJson(ultimaResposta).eventos;
+  assert.equal(
+    eventos.at(-1).dados.mensagem,
+    "Muitas mensagens foram enviadas em pouco tempo.",
+  );
 });
 
 test("uma partida continua após reconexão autenticada", async (contexto) => {
@@ -756,7 +891,10 @@ test("a reconexão durante a seleção não revela a equipe adversária", async 
 });
 
 test("a vaga é liberada quando o prazo de reconexão termina", async (contexto) => {
-  const { porta } = await iniciarAplicacao(contexto, { prazoReconexao: 30 });
+  const { porta } = await iniciarAplicacao(contexto, {
+    prazoReconexao: 30,
+    tempoInatividadeSessao: 60,
+  });
   const primeiro = await conectarCliente(contexto, porta);
   const segundo = await conectarCliente(contexto, porta);
   const conexaoSegundo = await segundo.receber(EVENTOS.CONEXAO);
@@ -769,7 +907,7 @@ test("a vaga é liberada quando o prazo de reconexão termina", async (contexto)
     primeiro.receber(EVENTOS.SALA_ENTRADA),
     segundo.receber(EVENTOS.SALA_ENTRADA),
   ]);
-  await segundo.fechar();
+  segundo.abandonar();
   assert.equal(
     (await primeiro.receber(EVENTOS.OPONENTE_DESCONECTADO)).dados.temporario,
     true,
