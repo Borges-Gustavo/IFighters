@@ -251,13 +251,18 @@
           VOLTAR
         </button>
         <div class="painel-equipe painel-referencia">
-          <h1 id="titulo-equipe">Escolha seu IFighter</h1>
+          <h1 id="titulo-equipe">Monte sua equipe</h1>
+          <p id="instrucao-equipe">
+            Escolha exatamente 3 IFighters. O primeiro será enviado à batalha.
+          </p>
           <div
             id="lista-lutadores"
             class="lista-lutadores"
             role="group"
-            aria-label="Lutadores disponíveis"
+            aria-label="Lutadores disponíveis para a equipe"
+            aria-describedby="instrucao-equipe status-equipe"
           ></div>
+          <p id="status-equipe" class="status-equipe" role="status" aria-live="polite"></p>
         </div>
         <aside
           id="previa-lutador"
@@ -266,12 +271,12 @@
           aria-live="polite"
         ></aside>
         <button
-          id="botao-confirmar-lutador"
+          id="botao-confirmar-equipe"
           class="botao-confirmar selecionavel"
           type="button"
-          data-acao="confirmar-lutador"
+          data-acao="confirmar-equipe"
         >
-          CONFIRMAR
+          CONFIRMAR EQUIPE
         </button>
       </section>
 
@@ -292,6 +297,24 @@
           VOLTAR
         </button>
         <div class="painel-dex painel-referencia">
+          <div class="cabecalho-ifdex">
+            <label for="busca-ifdex">Buscar na IFDEX</label>
+            <input
+              id="busca-ifdex"
+              class="campo-busca-ifdex selecionavel"
+              type="search"
+              placeholder="Pessoa, Pokémon, tipo ou número"
+              autocomplete="off"
+              aria-controls="grade-ifdex"
+              data-foco-inicial
+            >
+            <output
+              id="contador-ifdex"
+              class="contador-ifdex"
+              for="busca-ifdex"
+              aria-live="polite"
+            ></output>
+          </div>
           <button
             class="seta-dex selecionavel"
             type="button"
@@ -438,7 +461,69 @@
               aria-live="polite"
               aria-atomic="true"
             ></p>
-            <div id="lista-golpes" class="lista-golpes"></div>
+            <div
+              id="menu-acoes-batalha"
+              class="menu-acoes-batalha"
+              role="group"
+              aria-label="Ação da rodada"
+            >
+              <button
+                class="selecionavel"
+                type="button"
+                data-acao="batalha-lutar"
+                data-foco-inicial
+              >
+                LUTAR
+              </button>
+              <button
+                class="selecionavel"
+                type="button"
+                data-acao="batalha-pokemon"
+              >
+                POKÉMON
+              </button>
+            </div>
+            <section
+              id="painel-golpes"
+              class="painel-comando-batalha"
+              aria-labelledby="titulo-golpes"
+              hidden
+            >
+              <div class="cabecalho-comando-batalha">
+                <h2 id="titulo-golpes">Escolha um ataque</h2>
+                <button
+                  class="botao-comando-voltar selecionavel"
+                  type="button"
+                  data-acao="batalha-voltar"
+                >
+                  VOLTAR
+                </button>
+              </div>
+              <div id="lista-golpes" class="lista-golpes"></div>
+            </section>
+            <section
+              id="painel-equipe-batalha"
+              class="painel-comando-batalha"
+              aria-labelledby="titulo-equipe-batalha"
+              hidden
+            >
+              <div class="cabecalho-comando-batalha">
+                <h2 id="titulo-equipe-batalha">Trocar Pokémon</h2>
+                <button
+                  class="botao-comando-voltar selecionavel"
+                  type="button"
+                  data-acao="batalha-voltar"
+                >
+                  VOLTAR
+                </button>
+              </div>
+              <div
+                id="lista-equipe-batalha"
+                class="lista-equipe-batalha"
+                role="group"
+                aria-label="Equipe disponível para troca"
+              ></div>
+            </section>
           </div>
         </div>
         <div

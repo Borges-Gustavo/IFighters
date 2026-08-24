@@ -47,10 +47,11 @@ Em ambientes automatizados, `npm ci` pode substituir `npm install` para reproduz
 
 ### Partida local
 
-1. Inicie a introdução ou avance para a abertura.
+1. Assista à introdução automática ou avance para a abertura.
 2. Escolha **Jogar** e depois **Um jogador**.
-3. Selecione um IFighter, confira a prévia e confirme.
-4. Escolha um golpe a cada turno até o encerramento da batalha.
+3. Monte uma equipe com exatamente três IFighters. O primeiro selecionado será o inicial.
+4. Em cada turno, escolha **Lutar** para abrir os quatro movimentos ou **Pokémon** para trocar o integrante ativo.
+5. A troca consome o turno e acontece antes dos golpes. A batalha termina somente quando os três integrantes de uma equipe forem derrotados.
 
 ### Multiplayer em duas abas ou dispositivos
 
@@ -58,8 +59,10 @@ Em ambientes automatizados, `npm ci` pode substituir `npm install` para reproduz
 2. Abra `http://localhost:3000` em duas abas do navegador. Para jogar em dois dispositivos da mesma rede, abra `http://IP_DO_SERVIDOR:3000` nos dois e permita a porta no firewall, se necessário.
 3. No primeiro cliente, escolha **Jogar**, **Multiplayer** e **Criar sala**.
 4. Copie o código exibido. No segundo cliente, informe esse código e escolha **Entrar**.
-5. Cada participante seleciona seu IFighter. A batalha começa quando os dois confirmam.
-6. Cada turno é resolvido depois que ambos escolhem um golpe. Ao final, os participantes podem solicitar uma revanche ou sair da sala.
+5. Cada participante monta e confirma uma equipe de três IFighters. A equipe adversária permanece privada durante a seleção.
+6. Cada turno é resolvido depois que ambos escolhem um golpe ou uma troca. O servidor valida e resolve todas as ações.
+7. Se a conexão cair, o jogo tenta retomar a sessão autenticada por até 30 segundos sem perder vidas ou a ação pendente.
+8. Ao final, os participantes podem solicitar uma revanche ou sair da sala.
 
 O servidor guarda as salas apenas em memória. Reiniciar o processo encerra as partidas e invalida os códigos existentes. Para dispositivos fora da rede local, publique o projeto atrás de HTTPS e use uma conexão WebSocket segura.
 
@@ -110,21 +113,28 @@ Fluxo principal dos eventos:
 | Servidor → cliente | `sala_criada` | Retorna o código da sala. |
 | Cliente → servidor | `entrar_sala` | Entra em uma sala usando o código recebido. |
 | Servidor → clientes | `sala_entrada` | Confirma que a sala possui os dois participantes. |
-| Cliente → servidor | `selecionar_lutador` | Confirma o IFighter escolhido. |
+| Cliente → servidor | `selecionar_equipe` | Confirma três IFighters diferentes e define o inicial. |
 | Servidor → clientes | `batalha_iniciada` | Envia o estado inicial quando ambos confirmam. |
-| Cliente → servidor | `escolher_golpe` | Registra a ação do turno. |
+| Cliente → servidor | `escolher_acao` | Registra um golpe ou uma troca para o turno atual. |
 | Servidor → cliente | `acao_aceita` | Confirma que a ação foi recebida e aguarda o oponente. |
 | Servidor → clientes | `resultado_turno` ou `batalha_encerrada` | Distribui os registros e o novo estado da batalha. |
+| Cliente → servidor | `reentrar_sala` | Retoma uma sessão interrompida usando código, identificação e token privado. |
+| Servidor → cliente | `sala_reentrada` | Confirma a retomada e devolve o estado preservado. |
+| Servidor → cliente | `oponente_reconectado` | Informa que o outro participante retornou. |
 | Cliente → servidor | `solicitar_revanche` | Registra o interesse em uma nova batalha. |
 | Servidor → clientes | `status_revanche` | Informa quais participantes aceitaram a revanche. |
 | Cliente → servidor | `sair_sala` | Abandona a sala atual. |
 | Servidor → cliente | `oponente_desconectado` | Informa a saída ou desconexão do outro participante. |
 | Servidor → cliente | `erro_sala` | Informa código inválido, sala cheia ou ação incompatível com o estado atual. |
 
-O estado compartilhado possui `codigo`, `situacao` e `jogadores`. Cada jogador informa `id`, `lutadorId`, `vidaAtual` e `revanche`. A situação avança por `aguardando`, `selecao`, `batalha` e `encerrada`.
+O estado compartilhado possui `codigo`, `situacao`, `numeroTurno` e `jogadores`. Cada jogador informa `id`, `equipe`, `lutadorAtivoId` e `revanche`; cada membro da equipe possui `lutadorId` e `vidaAtual`. A situação avança por `aguardando`, `selecao`, `batalha` e `encerrada`.
+
+O servidor é a autoridade sobre validação, ordem, dano, troca, entrada automática da próxima reserva, vitória e revanche. Credenciais de retomada ficam apenas na sessão do navegador, e o token é rotacionado depois de cada reconexão bem-sucedida.
 
 ## Codificação e recursos visuais
 
 Os arquivos de texto usam UTF-8, finais de linha LF, indentação de dois espaços e uma quebra de linha final. `.editorconfig`, `.gitattributes` e as configurações do VS Code mantêm esse padrão entre sistemas operacionais. Palavras reservadas das linguagens e chaves obrigatórias de ferramentas permanecem com a grafia exigida por essas tecnologias.
 
-Os recursos visuais ficam em `img/game/` e `img/sprites/`. Os nomes seguem letras minúsculas em ASCII, palavras separadas por hífen e nenhum espaço antes da extensão, por exemplo `img/sprites/leonardo-lucario.png`. Ao incluir ou renomear um arquivo, atualize também sua referência em `main.html`, `data.js` ou `style.css`. O fundo principal utilizado pela interface é `img/game/fundo.png`.
+Os recursos visuais ficam em `img/game/` e `img/sprites/`. Os 37 sprites da IFDEX usam PNG, nomes em letras minúsculas ASCII e palavras separadas por hífen, por exemplo `img/sprites/leonardo-lucario.png`. Ao incluir ou renomear um arquivo, atualize também sua referência em `main.html`, `data.js` ou `style.css`. O fundo principal utilizado pela interface é `img/game/fundo.png`.
+
+A IFDEX é ordenada alfabeticamente e pode ser pesquisada por pessoa, Pokémon, tipo ou número. Cada registro exibe tipos, atributos e quatro movimentos com nome localizado, nome original, tipo e poder-base de referência.

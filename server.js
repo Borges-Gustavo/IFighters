@@ -51,7 +51,7 @@ const CABECALHOS_SEGURANCA = Object.freeze({
     "media-src 'self'",
     "object-src 'none'",
     "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
+    "style-src 'self'",
     "base-uri 'none'",
     "frame-ancestors 'none'",
   ].join("; "),
@@ -65,8 +65,9 @@ const CABECALHOS_SEGURANCA = Object.freeze({
 const EVENTOS_RECEBIDOS = new Set([
   EVENTOS.CRIAR_SALA,
   EVENTOS.ENTRAR_SALA,
-  EVENTOS.SELECIONAR_LUTADOR,
-  EVENTOS.ESCOLHER_GOLPE,
+  EVENTOS.REENTRAR_SALA,
+  EVENTOS.SELECIONAR_EQUIPE,
+  EVENTOS.ESCOLHER_ACAO,
   EVENTOS.SOLICITAR_REVANCHE,
   EVENTOS.SAIR_SALA,
 ]);
@@ -82,6 +83,11 @@ const LIMITE_MENSAGEM = 16 * 1024;
 const LIMITE_MENSAGENS_POR_JANELA = 60;
 const DURACAO_JANELA_MENSAGENS = 10_000;
 const INTERVALO_VERIFICACAO_CONEXAO = 30_000;
+const PRAZO_RECONEXAO = 30_000;
+const VERSAO_PROTOCOLO = 2;
+const QUANTIDADE_LUTADORES_EQUIPE = 3;
+const CODIGO_SALA_VALIDO = /^[A-HJ-NP-Z2-9]{6}$/;
+const TOKEN_RECONEXAO_VALIDO = /^[A-Za-z0-9_-]{43}$/;
 
 function ehObjetoSimples(valor) {
   return valor !== null && typeof valor === "object" && !Array.isArray(valor);
@@ -151,6 +157,58 @@ function recursoEstaLiberado(caminhoRelativo) {
   );
 }
 
+function interpretarFaixaBytes(cabecalho, tamanho) {
+  if (cabecalho === undefined) {
+    return null;
+  }
+
+  if (typeof cabecalho !== "string") {
+    return false;
+  }
+
+  const correspondencia = /^bytes=(\d*)-(\d*)$/.exec(cabecalho.trim());
+  if (!correspondencia || (!correspondencia[1] && !correspondencia[2])) {
+    return false;
+  }
+
+  const inicioInformado = correspondencia[1]
+    ? Number(correspondencia[1])
+    : null;
+  const fimInformado = correspondencia[2]
+    ? Number(correspondencia[2])
+    : null;
+
+  if (
+    (inicioInformado !== null && !Number.isSafeInteger(inicioInformado)) ||
+    (fimInformado !== null && !Number.isSafeInteger(fimInformado))
+  ) {
+    return false;
+  }
+
+  let inicio;
+  let fim;
+
+  if (inicioInformado === null) {
+    if (fimInformado <= 0) {
+      return false;
+    }
+    inicio = Math.max(0, tamanho - fimInformado);
+    fim = tamanho - 1;
+  } else {
+    inicio = inicioInformado;
+    fim =
+      fimInformado === null
+        ? tamanho - 1
+        : Math.min(fimInformado, tamanho - 1);
+  }
+
+  if (inicio < 0 || inicio >= tamanho || fim < inicio) {
+    return false;
+  }
+
+  return { fim, inicio };
+}
+
 function criarAtendedorHttp(diretorioRaiz) {
   const raizReal = fs.realpathSync(diretorioRaiz);
 
@@ -210,22 +268,50 @@ function criarAtendedorHttp(diretorioRaiz) {
       return;
     }
 
-    aplicarCabecalhosSeguranca(resposta);
-    resposta.writeHead(200, {
-      "Cache-Control": "no-cache",
-      "Content-Length": informacoes.size,
-      "Content-Type":
-        TIPOS_MIME[path.extname(caminhoReal).toLowerCase()] ||
-        "application/octet-stream",
-      "Last-Modified": informacoes.mtime.toUTCString(),
-    });
+    const faixa = interpretarFaixaBytes(
+      requisicao.headers.range,
+      informacoes.size,
+    );
 
-    if (requisicao.method === "HEAD") {
+    if (faixa === false) {
+      aplicarCabecalhosSeguranca(resposta);
+      resposta.writeHead(416, {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+        "Content-Length": 0,
+        "Content-Range": `bytes */${informacoes.size}`,
+      });
       resposta.end();
       return;
     }
 
-    const fluxo = fs.createReadStream(caminhoReal);
+    const inicio = faixa?.inicio ?? 0;
+    const fim = faixa?.fim ?? informacoes.size - 1;
+    const tamanhoResposta = fim - inicio + 1;
+    const cabecalhos = {
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "no-cache",
+      "Content-Length": tamanhoResposta,
+      "Content-Type":
+        TIPOS_MIME[path.extname(caminhoReal).toLowerCase()] ||
+        "application/octet-stream",
+      "Last-Modified": informacoes.mtime.toUTCString(),
+    };
+
+    if (faixa) {
+      cabecalhos["Content-Range"] =
+        `bytes ${inicio}-${fim}/${informacoes.size}`;
+    }
+
+    aplicarCabecalhosSeguranca(resposta);
+    resposta.writeHead(faixa ? 206 : 200, cabecalhos);
+
+    if (requisicao.method === "HEAD" || tamanhoResposta === 0) {
+      resposta.end();
+      return;
+    }
+
+    const fluxo = fs.createReadStream(caminhoReal, { end: fim, start: inicio });
     fluxo.once("error", () => {
       if (resposta.headersSent) {
         resposta.destroy();
@@ -271,10 +357,17 @@ function criarCodigoSeguro(salas) {
   throw new Error("Não foi possível gerar um código de sala exclusivo.");
 }
 
-function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.random } = {}) {
+function criarServidor({
+  porta = process.env.PORT || 3000,
+  aleatorio = Math.random,
+  prazoReconexao = PRAZO_RECONEXAO,
+} = {}) {
   const portaConfigurada = validarPorta(porta);
   if (typeof aleatorio !== "function") {
     throw new TypeError("A fonte de aleatoriedade deve ser uma função.");
+  }
+  if (!Number.isInteger(prazoReconexao) || prazoReconexao < 10) {
+    throw new TypeError("O prazo de reconexão deve ser de ao menos 10 ms.");
   }
 
   const salas = new Map();
@@ -313,19 +406,20 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
   let promessaDeEncerramento = null;
 
   function enviar(jogador, tipo, dados = {}) {
-    if (jogador.conexao.readyState !== WebSocket.OPEN) {
+    const conexao = jogador.conexao;
+    if (!conexao || conexao.readyState !== WebSocket.OPEN) {
       return false;
     }
 
     try {
-      jogador.conexao.send(JSON.stringify({ tipo, dados }), (erro) => {
-        if (erro && jogador.conexao.readyState !== WebSocket.CLOSED) {
-          jogador.conexao.terminate();
+      conexao.send(JSON.stringify({ tipo, dados }), (erro) => {
+        if (erro && conexao.readyState !== WebSocket.CLOSED) {
+          conexao.terminate();
         }
       });
       return true;
     } catch {
-      jogador.conexao.terminate();
+      conexao.terminate();
       return false;
     }
   }
@@ -348,28 +442,67 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     return salas.get(jogador.codigoSala) || null;
   }
 
+  function criarTokenReconexao() {
+    return crypto.randomBytes(32).toString("base64url");
+  }
+
+  function obterMembroDaEquipe(jogador, lutadorId) {
+    return (
+      jogador.equipe.find((membro) => membro.lutadorId === lutadorId) || null
+    );
+  }
+
+  function obterMembroAtivo(jogador) {
+    return obterMembroDaEquipe(jogador, jogador.lutadorAtivoId);
+  }
+
+  function obterLutadorAtivo(jogador) {
+    return LUTADORES_POR_ID.get(jogador.lutadorAtivoId) || null;
+  }
+
+  function jogadorTemLutadoresVivos(jogador) {
+    return jogador.equipe.some((membro) => membro.vidaAtual > 0);
+  }
+
   function zerarEstadoDeBatalha(jogador) {
-    jogador.lutadorId = null;
-    jogador.vidaAtual = 0;
+    jogador.equipe = [];
+    jogador.lutadorAtivoId = null;
     jogador.acao = null;
     jogador.revanche = false;
   }
 
-  function estadoDaSala(sala) {
+  function estadoDaSala(sala, destinatario = null) {
     return {
       codigo: sala.codigo,
       situacao: sala.situacao,
-      jogadores: sala.jogadores.map((jogador) => ({
-        id: jogador.id,
-        lutadorId: jogador.lutadorId,
-        vidaAtual: jogador.vidaAtual,
-        revanche: jogador.revanche,
-      })),
+      numeroTurno: sala.numeroTurno,
+      jogadores: sala.jogadores.map((jogador) => {
+        const ocultarEquipe =
+          sala.situacao === SITUACOES.SELECAO &&
+          destinatario &&
+          jogador !== destinatario;
+        return {
+          id: jogador.id,
+          equipe: ocultarEquipe
+            ? []
+            : jogador.equipe.map((membro) => ({ ...membro })),
+          lutadorAtivoId: ocultarEquipe ? null : jogador.lutadorAtivoId,
+          revanche: jogador.revanche,
+        };
+      }),
     };
+  }
+
+  function limparPrazoReconexao(jogador) {
+    if (jogador.temporizadorReconexao) {
+      clearTimeout(jogador.temporizadorReconexao);
+      jogador.temporizadorReconexao = null;
+    }
   }
 
   function removerJogadorDaSala(jogador, mensagemAoOponente) {
     const sala = obterSala(jogador);
+    limparPrazoReconexao(jogador);
     jogador.codigoSala = null;
     zerarEstadoDeBatalha(jogador);
 
@@ -387,30 +520,75 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     }
 
     sala.situacao = SITUACOES.AGUARDANDO;
+    sala.numeroTurno = 0;
+    sala.vencedorId = null;
     for (const participante of sala.jogadores) {
       zerarEstadoDeBatalha(participante);
     }
 
-    transmitir(sala, EVENTOS.OPONENTE_DESCONECTADO, {
-      mensagem: mensagemAoOponente,
-    });
+    if (mensagemAoOponente) {
+      transmitir(sala, EVENTOS.OPONENTE_DESCONECTADO, {
+        mensagem: mensagemAoOponente,
+        prazoMs: 0,
+        temporario: false,
+      });
+    }
     return true;
+  }
+
+  function agendarRemocaoPorDesconexao(jogador) {
+    const sala = obterSala(jogador);
+    if (!sala || jogador.temporizadorReconexao) {
+      return;
+    }
+
+    jogador.conexao = null;
+    transmitir(sala, EVENTOS.OPONENTE_DESCONECTADO, {
+      mensagem: "O adversário se desconectou. Aguardando reconexão…",
+      prazoMs: prazoReconexao,
+      temporario: true,
+    });
+
+    jogador.temporizadorReconexao = setTimeout(() => {
+      jogador.temporizadorReconexao = null;
+      removerJogadorDaSala(
+        jogador,
+        "O adversário não retornou e saiu da sala.",
+      );
+    }, prazoReconexao);
+    jogador.temporizadorReconexao.unref();
+  }
+
+  function jogadoresEstaoConectados(sala) {
+    return sala.jogadores.every(
+      (jogador) => jogador.conexao?.readyState === WebSocket.OPEN,
+    );
   }
 
   function iniciarBatalha(sala) {
     if (
       sala.jogadores.length !== 2 ||
-      sala.jogadores.some(
-        (jogador) => !LUTADORES_POR_ID.has(jogador.lutadorId),
+      !jogadoresEstaoConectados(sala) ||
+      sala.jogadores.some((jogador) =>
+        jogador.equipe.length !== QUANTIDADE_LUTADORES_EQUIPE ||
+        jogador.equipe.some(
+          (membro) => !LUTADORES_POR_ID.has(membro.lutadorId),
+        )
       )
     ) {
       return false;
     }
 
     sala.situacao = SITUACOES.BATALHA;
+    sala.numeroTurno = 1;
+    sala.vencedorId = null;
     for (const jogador of sala.jogadores) {
-      const lutador = LUTADORES_POR_ID.get(jogador.lutadorId);
-      jogador.vidaAtual = lutador.atributos.vida;
+      for (const membro of jogador.equipe) {
+        membro.vidaAtual = LUTADORES_POR_ID.get(
+          membro.lutadorId,
+        ).atributos.vida;
+      }
+      jogador.lutadorAtivoId = jogador.equipe[0].lutadorId;
       jogador.acao = null;
       jogador.revanche = false;
     }
@@ -421,23 +599,83 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     return true;
   }
 
+  function ativarPrimeiraReservaViva(jogador, registros) {
+    const reserva = jogador.equipe.find((membro) => membro.vidaAtual > 0);
+    if (!reserva) {
+      return false;
+    }
+
+    jogador.lutadorAtivoId = reserva.lutadorId;
+    const lutador = LUTADORES_POR_ID.get(reserva.lutadorId);
+    registros.push(`${lutador.nome} entrou na batalha.`);
+    return true;
+  }
+
+  function aplicarTrocas(sala, registros) {
+    for (const jogador of sala.jogadores) {
+      if (jogador.acao.tipo !== "troca") {
+        continue;
+      }
+
+      const anterior = obterLutadorAtivo(jogador);
+      const proximo = LUTADORES_POR_ID.get(jogador.acao.lutadorId);
+      jogador.lutadorAtivoId = jogador.acao.lutadorId;
+      registros.push(`${anterior.nome} recuou. ${proximo.nome} entrou na batalha.`);
+    }
+  }
+
+  function criarAcoesDeGolpe(sala) {
+    return sala.jogadores
+      .filter((jogador) => jogador.acao.tipo === "golpe")
+      .map((jogador) => {
+        const atacante = obterLutadorAtivo(jogador);
+        return {
+          atacante,
+          atacanteId: jogador.lutadorAtivoId,
+          golpe: atacante.golpes[jogador.acao.indiceGolpe],
+          jogador,
+        };
+      });
+  }
+
+  function ordenarAcoesDeGolpe(acoes) {
+    if (acoes.length < 2) {
+      return acoes;
+    }
+
+    return REGRAS_BATALHA.ordenarAcoes(acoes[0], acoes[1], aleatorio);
+  }
+
   function resolverTurno(sala) {
-    const acoesOrdenadas = REGRAS_BATALHA.ordenarAcoes(
-      sala.jogadores[0].acao,
-      sala.jogadores[1].acao,
-      aleatorio,
-    );
+    const numeroTurno = sala.numeroTurno;
     const registros = [];
+    aplicarTrocas(sala, registros);
+    const acoesOrdenadas = ordenarAcoesDeGolpe(criarAcoesDeGolpe(sala));
 
     for (const acao of acoesOrdenadas) {
+      const atacanteMembro = obterMembroDaEquipe(
+        acao.jogador,
+        acao.atacanteId,
+      );
+      if (
+        acao.jogador.lutadorAtivoId !== acao.atacanteId ||
+        !atacanteMembro ||
+        atacanteMembro.vidaAtual <= 0
+      ) {
+        continue;
+      }
+
       const defensorJogador = sala.jogadores.find(
         (jogador) => jogador !== acao.jogador,
       );
-      if (!defensorJogador || defensorJogador.vidaAtual <= 0) {
+      const defensorMembro = defensorJogador
+        ? obterMembroAtivo(defensorJogador)
+        : null;
+      if (!defensorJogador || !defensorMembro || defensorMembro.vidaAtual <= 0) {
         break;
       }
 
-      const defensor = LUTADORES_POR_ID.get(defensorJogador.lutadorId);
+      const defensor = obterLutadorAtivo(defensorJogador);
       if (!REGRAS_BATALHA.golpeAcertou(acao.golpe, aleatorio)) {
         registros.push(
           `${acao.atacante.nome} usou ${acao.golpe.nome}, mas errou.`,
@@ -450,9 +688,9 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
         defensor,
         acao.golpe,
       );
-      defensorJogador.vidaAtual = Math.max(
+      defensorMembro.vidaAtual = Math.max(
         0,
-        defensorJogador.vidaAtual - dano,
+        defensorMembro.vidaAtual - dano,
       );
 
       if (dano === 0) {
@@ -463,8 +701,9 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
         );
       }
 
-      if (defensorJogador.vidaAtual === 0) {
-        break;
+      if (defensorMembro.vidaAtual === 0) {
+        registros.push(`${defensor.nome} foi derrotado.`);
+        ativarPrimeiraReservaViva(defensorJogador, registros);
       }
     }
 
@@ -473,23 +712,27 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     }
 
     const derrotado = sala.jogadores.find(
-      (jogador) => jogador.vidaAtual === 0,
+      (jogador) => !jogadorTemLutadoresVivos(jogador),
     );
     if (derrotado) {
       const vencedor = sala.jogadores.find(
         (jogador) => jogador !== derrotado,
       );
       sala.situacao = SITUACOES.ENCERRADA;
+      sala.vencedorId = vencedor.id;
       transmitir(sala, EVENTOS.BATALHA_ENCERRADA, {
         estado: estadoDaSala(sala),
-        vencedorId: vencedor.id,
+        numeroTurno,
         registros,
+        vencedorId: vencedor.id,
       });
       return;
     }
 
+    sala.numeroTurno += 1;
     transmitir(sala, EVENTOS.RESULTADO_TURNO, {
       estado: estadoDaSala(sala),
+      numeroTurno,
       registros,
     });
   }
@@ -517,8 +760,10 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     const codigo = criarCodigoSeguro(salas);
     const sala = {
       codigo,
-      situacao: SITUACOES.AGUARDANDO,
       jogadores: [jogador],
+      numeroTurno: 0,
+      situacao: SITUACOES.AGUARDANDO,
+      vencedorId: null,
     };
     jogador.codigoSala = codigo;
     salas.set(codigo, sala);
@@ -540,7 +785,7 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     }
 
     const codigo = dados.codigo.trim().toUpperCase();
-    if (!/^[A-Z0-9]{6}$/.test(codigo)) {
+    if (!CODIGO_SALA_VALIDO.test(codigo)) {
       enviarErro(jogador, "Informe um código de sala válido.");
       return;
     }
@@ -568,13 +813,105 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
     transmitir(sala, EVENTOS.SALA_ENTRADA, { codigo });
   }
 
-  function selecionarLutador(jogador, dados) {
+  function tokensSaoIguais(primeiro, segundo) {
     if (
-      !dadosSaoValidos(dados, ["lutadorId"]) ||
-      typeof dados.lutadorId !== "string" ||
-      !LUTADORES_POR_ID.has(dados.lutadorId)
+      typeof primeiro !== "string" ||
+      typeof segundo !== "string" ||
+      primeiro.length !== segundo.length
     ) {
-      enviarErro(jogador, "Seleção de lutador inválida.");
+      return false;
+    }
+
+    return crypto.timingSafeEqual(Buffer.from(primeiro), Buffer.from(segundo));
+  }
+
+  function reentrarNaSala(jogador, dados) {
+    if (
+      !dadosSaoValidos(dados, ["codigo", "jogadorId", "tokenReconexao"]) ||
+      typeof dados.codigo !== "string" ||
+      typeof dados.jogadorId !== "string" ||
+      !TOKEN_RECONEXAO_VALIDO.test(dados.tokenReconexao)
+    ) {
+      enviarErro(jogador, "Credenciais de reconexão inválidas.");
+      return;
+    }
+
+    if (jogador.codigoSala) {
+      enviarErro(jogador, "Você já está em uma sala.");
+      return;
+    }
+
+    const codigo = dados.codigo.trim().toUpperCase();
+    const sala = CODIGO_SALA_VALIDO.test(codigo) ? salas.get(codigo) : null;
+    const jogadorAnterior = sala?.jogadores.find(
+      (participante) => participante.id === dados.jogadorId,
+    );
+
+    if (
+      !sala ||
+      !jogadorAnterior ||
+      jogadorAnterior.conexao ||
+      !jogadorAnterior.temporizadorReconexao ||
+      !tokensSaoIguais(
+        jogadorAnterior.tokenReconexao,
+        dados.tokenReconexao,
+      )
+    ) {
+      enviarErro(jogador, "Não foi possível retomar essa sessão.");
+      return;
+    }
+
+    limparPrazoReconexao(jogadorAnterior);
+    Object.assign(jogador, {
+      acao: jogadorAnterior.acao,
+      codigoSala: codigo,
+      equipe: jogadorAnterior.equipe,
+      id: jogadorAnterior.id,
+      lutadorAtivoId: jogadorAnterior.lutadorAtivoId,
+      revanche: jogadorAnterior.revanche,
+      tokenReconexao: criarTokenReconexao(),
+    });
+    jogadorAnterior.codigoSala = null;
+
+    const indice = sala.jogadores.indexOf(jogadorAnterior);
+    sala.jogadores[indice] = jogador;
+    enviar(jogador, EVENTOS.SALA_REENTRADA, {
+      acaoPendente: Boolean(jogador.acao),
+      equipeConfirmada:
+        jogador.equipe.length === QUANTIDADE_LUTADORES_EQUIPE,
+      estado: estadoDaSala(sala, jogador),
+      jogadorId: jogador.id,
+      tokenReconexao: jogador.tokenReconexao,
+      vencedorId: sala.vencedorId,
+    });
+
+    for (const oponente of sala.jogadores) {
+      if (oponente === jogador) {
+        continue;
+      }
+      enviar(oponente, EVENTOS.OPONENTE_RECONECTADO, {
+        acaoPendente: Boolean(oponente.acao),
+        equipeConfirmada:
+          oponente.equipe.length === QUANTIDADE_LUTADORES_EQUIPE,
+        estado: estadoDaSala(sala, oponente),
+        mensagem: "O adversário se reconectou.",
+        vencedorId: sala.vencedorId,
+      });
+    }
+  }
+
+  function selecionarEquipe(jogador, dados) {
+    if (
+      !dadosSaoValidos(dados, ["lutadorIds"]) ||
+      !Array.isArray(dados.lutadorIds) ||
+      dados.lutadorIds.length !== QUANTIDADE_LUTADORES_EQUIPE ||
+      new Set(dados.lutadorIds).size !== QUANTIDADE_LUTADORES_EQUIPE ||
+      dados.lutadorIds.some(
+        (lutadorId) =>
+          typeof lutadorId !== "string" || !LUTADORES_POR_ID.has(lutadorId),
+      )
+    ) {
+      enviarErro(jogador, "Selecione exatamente três lutadores diferentes.");
       return;
     }
 
@@ -589,27 +926,59 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
       return;
     }
 
-    if (jogador.lutadorId) {
-      enviarErro(jogador, "Você já selecionou um lutador.");
+    if (!jogadoresEstaoConectados(sala)) {
+      enviarErro(jogador, "Aguardando a reconexão do adversário.");
       return;
     }
 
-    jogador.lutadorId = dados.lutadorId;
+    if (jogador.equipe.length) {
+      enviarErro(jogador, "Você já confirmou sua equipe.");
+      return;
+    }
+
+    jogador.equipe = dados.lutadorIds.map((lutadorId) => ({
+      lutadorId,
+      vidaAtual: 0,
+    }));
+    jogador.lutadorAtivoId = dados.lutadorIds[0];
     enviar(jogador, EVENTOS.ACAO_ACEITA, {
-      mensagem: "Lutador confirmado. Aguardando o adversário.",
+      mensagem: "Equipe confirmada. Aguardando o adversário.",
     });
     iniciarBatalha(sala);
   }
 
-  function escolherGolpe(jogador, dados) {
-    if (
-      !dadosSaoValidos(dados, ["indiceGolpe"]) ||
-      !Number.isInteger(dados.indiceGolpe)
-    ) {
-      enviarErro(jogador, "Índice de golpe inválido.");
-      return;
+  function validarAcao(jogador, dados) {
+    if (!dadosSaoValidos(dados, ["acao"]) || !ehObjetoSimples(dados.acao)) {
+      return null;
     }
 
+    const acao = dados.acao;
+    if (
+      acao.tipo === "golpe" &&
+      dadosSaoValidos(acao, ["tipo", "indiceGolpe"]) &&
+      Number.isInteger(acao.indiceGolpe) &&
+      obterLutadorAtivo(jogador)?.golpes[acao.indiceGolpe]
+    ) {
+      return { tipo: "golpe", indiceGolpe: acao.indiceGolpe };
+    }
+
+    const membro =
+      acao.tipo === "troca" && typeof acao.lutadorId === "string"
+        ? obterMembroDaEquipe(jogador, acao.lutadorId)
+        : null;
+    if (
+      dadosSaoValidos(acao, ["tipo", "lutadorId"]) &&
+      membro &&
+      membro.lutadorId !== jogador.lutadorAtivoId &&
+      membro.vidaAtual > 0
+    ) {
+      return { tipo: "troca", lutadorId: membro.lutadorId };
+    }
+
+    return null;
+  }
+
+  function escolherAcao(jogador, dados) {
     const sala = obterSala(jogador);
     if (!sala) {
       enviarErro(jogador, "Entre em uma sala primeiro.");
@@ -621,28 +990,29 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
       return;
     }
 
+    if (!jogadoresEstaoConectados(sala)) {
+      enviarErro(jogador, "Aguardando a reconexão do adversário.");
+      return;
+    }
+
     if (jogador.acao) {
-      enviarErro(jogador, "Você já escolheu um golpe neste turno.");
+      enviarErro(jogador, "Você já escolheu uma ação neste turno.");
       return;
     }
 
-    const lutador = LUTADORES_POR_ID.get(jogador.lutadorId);
-    const golpe = lutador && lutador.golpes[dados.indiceGolpe];
-    if (!golpe) {
-      enviarErro(jogador, "Golpe inválido.");
+    const acao = validarAcao(jogador, dados);
+    if (!acao) {
+      enviarErro(jogador, "Ação de batalha inválida.");
       return;
     }
 
-    jogador.acao = {
-      atacante: lutador,
-      golpe,
-      jogador,
-    };
+    jogador.acao = acao;
     enviar(jogador, EVENTOS.ACAO_ACEITA, {
-      mensagem: "Golpe aceito. Aguardando o adversário.",
+      mensagem: "Ação aceita. Aguardando o adversário.",
+      numeroTurno: sala.numeroTurno,
     });
 
-    if (sala.jogadores.length === 2 && sala.jogadores.every((item) => item.acao)) {
+    if (sala.jogadores.every((participante) => participante.acao)) {
       resolverTurno(sala);
     }
   }
@@ -661,6 +1031,11 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
 
     if (sala.situacao !== SITUACOES.ENCERRADA) {
       enviarErro(jogador, "A revanche só pode ser solicitada após a batalha.");
+      return;
+    }
+
+    if (!jogadoresEstaoConectados(sala)) {
+      enviarErro(jogador, "Aguardando a reconexão do adversário.");
       return;
     }
 
@@ -701,11 +1076,14 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
       case EVENTOS.ENTRAR_SALA:
         entrarNaSala(jogador, dados);
         break;
-      case EVENTOS.SELECIONAR_LUTADOR:
-        selecionarLutador(jogador, dados);
+      case EVENTOS.REENTRAR_SALA:
+        reentrarNaSala(jogador, dados);
         break;
-      case EVENTOS.ESCOLHER_GOLPE:
-        escolherGolpe(jogador, dados);
+      case EVENTOS.SELECIONAR_EQUIPE:
+        selecionarEquipe(jogador, dados);
+        break;
+      case EVENTOS.ESCOLHER_ACAO:
+        escolherAcao(jogador, dados);
         break;
       case EVENTOS.SOLICITAR_REVANCHE:
         solicitarRevanche(jogador, dados);
@@ -787,12 +1165,14 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
       acao: null,
       codigoSala: null,
       conexao,
+      equipe: [],
       id: crypto.randomUUID(),
       inicioJanelaMensagens: Date.now(),
-      lutadorId: null,
+      lutadorAtivoId: null,
       mensagensNaJanela: 0,
       revanche: false,
-      vidaAtual: 0,
+      temporizadorReconexao: null,
+      tokenReconexao: criarTokenReconexao(),
     };
 
     conexao.estaAtiva = true;
@@ -803,13 +1183,21 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
       receberMensagem(jogador, conteudo, mensagemBinaria);
     });
     conexao.on("close", () => {
-      removerJogadorDaSala(jogador, "O adversário se desconectou.");
+      if (encerrado) {
+        removerJogadorDaSala(jogador, null);
+      } else {
+        agendarRemocaoPorDesconexao(jogador);
+      }
     });
     conexao.on("error", () => {
       // O evento "close" realiza a limpeza; este ouvinte evita erro não tratado.
     });
 
-    enviar(jogador, EVENTOS.CONEXAO, { jogadorId: jogador.id });
+    enviar(jogador, EVENTOS.CONEXAO, {
+      jogadorId: jogador.id,
+      tokenReconexao: jogador.tokenReconexao,
+      versaoProtocolo: VERSAO_PROTOCOLO,
+    });
   });
 
   const verificadorDeConexoes = setInterval(() => {
@@ -869,6 +1257,11 @@ function criarServidor({ porta = process.env.PORT || 3000, aleatorio = Math.rand
 
     encerrado = true;
     clearInterval(verificadorDeConexoes);
+    for (const sala of salas.values()) {
+      for (const jogador of sala.jogadores) {
+        limparPrazoReconexao(jogador);
+      }
+    }
 
     promessaDeEncerramento = (async () => {
       if (promessaDeInicio && !servidorHttp.listening) {
