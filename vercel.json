@@ -3,6 +3,10 @@
   "framework": null,
   "rewrites": [
     {
+      "source": "/api/multijogador/:rota*",
+      "destination": "/api/multijogador?rota=:rota*"
+    },
+    {
       "source": "/",
       "destination": "/main.html"
     }
