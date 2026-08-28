@@ -36,7 +36,36 @@ function reconstruirUrl(requisicao) {
   return textoConsulta ? `${caminho}?${textoConsulta}` : caminho;
 }
 
+function responderStatus(requisicao, resposta) {
+  if (requisicao.method !== "GET") {
+    resposta.setHeader("Allow", "GET");
+    resposta.statusCode = 405;
+    resposta.setHeader("Content-Type", "application/json; charset=utf-8");
+    resposta.end(JSON.stringify({ erro: "Método não permitido." }));
+    return;
+  }
+
+  resposta.statusCode = 200;
+  resposta.setHeader("Cache-Control", "no-store");
+  resposta.setHeader("Content-Type", "application/json; charset=utf-8");
+  resposta.end(
+    JSON.stringify({
+      ambiente: "vercel",
+      intervaloPollingMs: 300,
+      transporte: "http",
+      status: "online",
+    }),
+  );
+}
+
 module.exports = async function multijogador(requisicao, resposta) {
+  const rota = obterRota(requisicao);
+
+  if (!rota || rota === "status") {
+    responderStatus(requisicao, resposta);
+    return;
+  }
+
   const runtime = obterRuntime();
   requisicao.url = reconstruirUrl(requisicao);
 
