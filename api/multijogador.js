@@ -3,6 +3,7 @@
 const { criarServidor } = require("../server");
 
 const CHAVE_RUNTIME = Symbol.for("ifighters.runtime.multijogador.vercel");
+const INTERVALO_POLLING_VERCEL = 1200;
 
 function obterRuntime() {
   if (!globalThis[CHAVE_RUNTIME]) {
@@ -36,38 +37,79 @@ function reconstruirUrl(requisicao) {
   return textoConsulta ? `${caminho}?${textoConsulta}` : caminho;
 }
 
-function responderStatus(requisicao, resposta) {
-  if (requisicao.method !== "GET") {
-    resposta.setHeader("Allow", "GET");
-    resposta.statusCode = 405;
-    resposta.setHeader("Content-Type", "application/json; charset=utf-8");
-    resposta.end(JSON.stringify({ erro: "Método não permitido." }));
-    return;
-  }
-
-  resposta.statusCode = 200;
+function responderStatus(resposta) {
   resposta.setHeader("Cache-Control", "no-store");
   resposta.setHeader("Content-Type", "application/json; charset=utf-8");
+  resposta.statusCode = 200;
   resposta.end(
     JSON.stringify({
       ambiente: "vercel",
-      intervaloPollingMs: 300,
+      intervaloPollingMs: INTERVALO_POLLING_VERCEL,
       transporte: "http",
       status: "online",
     }),
   );
 }
 
-module.exports = async function multijogador(requisicao, resposta) {
-  const rota = obterRota(requisicao);
+function adaptarRespostaServerless(requisicao, resposta) {
+  const caminho = requisicao.url.split("?", 1)[0];
+  const rotaSessao = caminho.startsWith("/api/multijogador/sessoes");
+  const criacaoSessao =
+    requisicao.method === "POST" && caminho === "/api/multijogador/sessoes";
 
-  if (!rota || rota === "status") {
-    responderStatus(requisicao, resposta);
+  const writeHeadOriginal = resposta.writeHead.bind(resposta);
+  resposta.writeHead = (statusCode, ...argumentos) => {
+    let codigo = statusCode;
+
+    // Em funções serverless uma requisição pode cair em uma instância diferente.
+    // Um 401 por sessão ausente nessa instância é transitório; o cliente já possui
+    // retry/backoff para 5xx e não deve destruir a partida imediatamente.
+    if (rotaSessao && statusCode === 401) {
+      codigo = 503;
+      resposta.setHeader("Retry-After", "1");
+    }
+
+    return writeHeadOriginal(codigo, ...argumentos);
+  };
+
+  if (!criacaoSessao) {
+    return;
+  }
+
+  const endOriginal = resposta.end.bind(resposta);
+  resposta.end = (corpo, ...argumentos) => {
+    if (typeof corpo === "string" || Buffer.isBuffer(corpo)) {
+      try {
+        const dados = JSON.parse(Buffer.isBuffer(corpo) ? corpo.toString("utf8") : corpo);
+        if (dados && typeof dados === "object" && "intervaloPollingMs" in dados) {
+          dados.intervaloPollingMs = INTERVALO_POLLING_VERCEL;
+          const novoCorpo = Buffer.from(JSON.stringify(dados), "utf8");
+          resposta.removeHeader("Content-Length");
+          resposta.setHeader("Content-Length", novoCorpo.length);
+          return endOriginal(novoCorpo, ...argumentos);
+        }
+      } catch {
+        // Mantém a resposta original caso não seja JSON.
+      }
+    }
+
+    return endOriginal(corpo, ...argumentos);
+  };
+}
+
+module.exports = async function multijogador(requisicao, resposta) {
+  requisicao.url = reconstruirUrl(requisicao);
+
+  if (
+    requisicao.method === "GET" &&
+    requisicao.url.split("?", 1)[0] === "/api/multijogador/status"
+  ) {
+    responderStatus(resposta);
     return;
   }
 
   const runtime = obterRuntime();
-  requisicao.url = reconstruirUrl(requisicao);
+  adaptarRespostaServerless(requisicao, resposta);
 
   await new Promise((resolver) => {
     let concluida = false;
