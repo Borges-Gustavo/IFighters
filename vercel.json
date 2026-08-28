@@ -1,14 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
+  "fluid": true,
   "rewrites": [
-    {
-      "source": "/api/multijogador/:rota*",
-      "destination": "/api/multijogador?rota=:rota*"
-    },
     {
       "source": "/",
       "destination": "/main.html"
+    },
+    {
+      "source": "/api/multijogador/:rota*",
+      "destination": "/api/multijogador?rota=:rota*"
     }
   ]
 }
