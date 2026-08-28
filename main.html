@@ -1,488 +1,437 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta
-      name="description"
-      content="IFighters: escolha seu lutador e dispute batalhas locais ou multijogador."
-    >
-    <title>IFighters</title>
-    <link rel="stylesheet" href="style.css">
-  </head>
-  <body>
-    <main id="aplicativo">
-      <section
-        class="tela introducao ativa"
-        data-tela="introducao"
-        aria-labelledby="titulo-introducao"
-      >
-        <h1 id="titulo-introducao" class="somente-leitores">
-          Introdução do IFighters
-        </h1>
-        <video
-          id="video-introducao"
-          preload="metadata"
-          playsinline
-          muted
-          aria-label="Vídeo de introdução do IFighters"
-        >
-          <source src="img/game/introducao.mp4" type="video/mp4">
-          Seu navegador não consegue reproduzir o vídeo de introdução.
-        </video>
-        <button
-          id="botao-iniciar-introducao"
-          class="botao-pixel selecionavel"
-          type="button"
-          aria-describedby="ajuda-introducao"
-        >
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="IFighters: escolha seu lutador e dispute batalhas locais ou multijogador.">
+  <meta name="theme-color" content="#07110d">
+  <title>IFighters</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <main id="aplicativo">
+    <section class="tela introducao ativa" data-tela="introducao" aria-labelledby="titulo-introducao">
+      <h1 id="titulo-introducao" class="somente-leitores">Introdução do IFighters</h1>
+      <video id="video-introducao" preload="metadata" playsinline muted aria-label="Vídeo de introdução do IFighters">
+        <source src="img/game/introducao.mp4" type="video/mp4">
+        Seu navegador não consegue reproduzir o vídeo de introdução.
+      </video>
+      <div class="controles-introducao">
+        <button id="botao-iniciar-introducao" class="botao-pixel selecionavel" type="button"
+          aria-describedby="ajuda-introducao">
           INICIAR
         </button>
-        <small id="ajuda-introducao">
-          Pressione Enter, Espaço ou clique para iniciar. Pressione Esc para pular.
-        </small>
-      </section>
+        <small id="ajuda-introducao">Enter, Espaço ou toque para iniciar. Esc pula a introdução.</small>
+      </div>
+    </section>
 
-      <section
-        class="tela abertura"
-        data-tela="abertura"
-        aria-labelledby="titulo-abertura"
-        aria-hidden="true"
-        inert
-      >
-        <h1 id="titulo-abertura" class="somente-leitores">IFighters</h1>
-        <img
-          class="logotipo-abertura"
-          src="img/game/logo.png"
-          alt="IFighters"
-        >
-        <strong class="demonstracao">DEMONSTRAÇÃO</strong>
-        <img
-          class="lutador-abertura"
-          src="img/sprites/coelho-cinderace.png"
-          alt=""
-        >
-        <button
-          class="botao-iniciar selecionavel"
-          type="button"
-          data-acao="abrir-menu"
-          data-foco-inicial
-        >
-          PRESSIONE ENTER PARA COMEÇAR
-        </button>
-      </section>
-
-      <section
-        class="tela campus"
-        data-tela="menu"
-        aria-labelledby="titulo-menu"
-        aria-hidden="true"
-        inert
-      >
-        <h1 id="titulo-menu" class="somente-leitores">Menu principal</h1>
-        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <nav class="painel-menu painel-referencia" aria-label="Menu principal">
-          <button
-            class="opcao-menu selecionavel"
-            type="button"
-            data-acao="abrir-jogar"
-            data-foco-inicial
-          >
-            JOGAR
-          </button>
-          <button
-            class="opcao-menu selecionavel"
-            type="button"
-            data-acao="abrir-ifdex"
-          >
-            IFDEX
-          </button>
-          <button
-            class="opcao-menu selecionavel"
-            type="button"
-            data-acao="abrir-configuracoes"
-          >
-            CONFIGURAÇÕES
-          </button>
-          <button
-            class="opcao-menu selecionavel"
-            type="button"
-            data-acao="abrir-creditos"
-          >
-            CRÉDITOS
-          </button>
-        </nav>
-        <div class="trio-menu" aria-hidden="true">
-          <img src="img/sprites/lazzari-bulbasaur.png" alt="">
-          <img src="img/sprites/arth-squirtle.png" alt="">
-          <img src="img/sprites/roque-charmander.png" alt="">
-        </div>
-        <span class="canto-laranja" aria-hidden="true"></span>
-      </section>
-
-      <section
-        class="tela campus"
-        data-tela="jogar"
-        aria-labelledby="titulo-jogar"
-        aria-hidden="true"
-        inert
-      >
-        <h1 id="titulo-jogar" class="somente-leitores">Escolha o modo de jogo</h1>
-        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <button
-          class="botao-voltar selecionavel"
-          type="button"
-          data-acao="voltar"
-        >
-          VOLTAR
-        </button>
-        <div class="painel-jogar painel-referencia">
-          <button
-            class="opcao-menu selecionavel"
-            type="button"
-            data-acao="iniciar-local"
-            data-foco-inicial
-          >
-            UM JOGADOR
-          </button>
-          <button
-            class="opcao-menu selecionavel"
-            type="button"
-            data-acao="abrir-multijogador"
-          >
-            MULTIJOGADOR
+    <section class="tela abertura" data-tela="abertura" aria-labelledby="titulo-abertura" aria-hidden="true" inert>
+      <div class="abertura-conteudo">
+        <div class="abertura-marca">
+          <img class="logotipo-abertura" src="img/game/logo.png" alt="IFighters">
+          <span class="selo-versao">DEMONSTRAÇÃO</span>
+          <h1 id="titulo-abertura">A batalha começa no campus.</h1>
+          <p>Monte sua equipe, conheça a IFDEX e enfrente seus colegas.</p>
+          <button class="botao-iniciar selecionavel" type="button" data-acao="abrir-menu" data-foco-inicial>
+            COMEÇAR
+            <small>ENTER OU TOQUE</small>
           </button>
         </div>
-        <img
-          class="personagem-jogar"
-          src="img/sprites/laura-leafeon.png"
-          alt=""
-        >
-        <span class="canto-laranja" aria-hidden="true"></span>
-      </section>
+        <div class="abertura-arte" aria-hidden="true">
+          <span class="halo-pixel"></span>
+          <img class="lutador-abertura" src="img/sprites/coelho-cinderace.png" alt="">
+        </div>
+      </div>
+    </section>
 
-      <section
-        class="tela campus"
-        data-tela="multijogador"
-        aria-labelledby="titulo-multijogador"
-        aria-hidden="true"
-        inert
-      >
+    <section class="tela campus" data-tela="menu" aria-labelledby="titulo-menu" aria-hidden="true" inert>
+      <header class="cabecalho-tela">
         <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <button
-          class="botao-voltar selecionavel"
-          type="button"
-          data-acao="sair-sala"
-        >
-          VOLTAR
-        </button>
-        <div class="painel-sala painel-referencia">
+        <span class="etiqueta-cabecalho">BATALHAS DO CAMPUS</span>
+      </header>
+
+      <div class="conteudo-tela menu-hero">
+        <div class="chamada-menu">
+          <p class="sobretitulo">IFRS · CAMPUS FARROUPILHA</p>
+          <h1 id="titulo-menu">Escolha seu próximo passo.</h1>
+          <p class="texto-apoio">Entre na arena, consulte os lutadores ou ajuste a experiência.</p>
+
+          <nav class="painel-menu" aria-label="Menu principal">
+            <button class="opcao-menu selecionavel" type="button" data-acao="abrir-jogar" data-foco-inicial>
+              <span class="opcao-menu-indice" aria-hidden="true">01</span>
+              <span><strong>JOGAR</strong><small>Uma batalha começa aqui</small></span>
+              <span class="opcao-menu-seta" aria-hidden="true">→</span>
+            </button>
+            <button class="opcao-menu selecionavel" type="button" data-acao="abrir-ifdex">
+              <span class="opcao-menu-indice" aria-hidden="true">02</span>
+              <span><strong>IFDEX</strong><small>Conheça todos os IFighters</small></span>
+              <span class="opcao-menu-seta" aria-hidden="true">→</span>
+            </button>
+            <button class="opcao-menu selecionavel" type="button" data-acao="abrir-configuracoes">
+              <span class="opcao-menu-indice" aria-hidden="true">03</span>
+              <span><strong>CONFIGURAÇÕES</strong><small>Acessibilidade e controles</small></span>
+              <span class="opcao-menu-seta" aria-hidden="true">→</span>
+            </button>
+            <button class="opcao-menu selecionavel" type="button" data-acao="abrir-creditos">
+              <span class="opcao-menu-indice" aria-hidden="true">04</span>
+              <span><strong>CRÉDITOS</strong><small>Quem construiu este mundo</small></span>
+              <span class="opcao-menu-seta" aria-hidden="true">→</span>
+            </button>
+          </nav>
+        </div>
+
+        <div class="vitrine-menu" aria-hidden="true">
+          <span class="vitrine-numero">03</span>
+          <p>ESCOLHA · TREINE · LUTE</p>
+          <div class="trio-menu">
+            <img src="img/sprites/mateus-chespin.png" alt="" loading="lazy" decoding="async">
+            <img src="img/sprites/arth-squirtle.png" alt="" loading="lazy" decoding="async">
+            <img src="img/sprites/roque-charmander.png" alt="" loading="lazy" decoding="async">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tela campus" data-tela="jogar" aria-labelledby="titulo-jogar" aria-hidden="true" inert>
+      <header class="cabecalho-tela">
+        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters" decoding="async">
+        <div class="titulo-cabecalho">
+          <span class="sobretitulo">NOVA BATALHA</span>
+          <h1 id="titulo-jogar">Como você quer jogar?</h1>
+        </div>
+        <button class="botao-voltar selecionavel" type="button" data-acao="voltar">← VOLTAR</button>
+      </header>
+
+      <div class="conteudo-tela escolher-modo">
+        <div class="painel-jogar">
+          <button class="cartao-modo selecionavel" type="button" data-acao="iniciar-local" data-foco-inicial>
+            <span class="numero-modo" aria-hidden="true">01</span>
+            <span class="icone-modo" aria-hidden="true">◆</span>
+            <strong>UM JOGADOR</strong>
+            <small>Monte sua equipe e enfrente um adversário controlado pelo jogo.</small>
+            <span class="acao-modo">INICIAR →</span>
+          </button>
+          <button class="cartao-modo selecionavel" type="button" data-acao="abrir-multijogador">
+            <span class="numero-modo" aria-hidden="true">02</span>
+            <span class="icone-modo" aria-hidden="true">◇</span>
+            <strong>MULTIJOGADOR</strong>
+            <small>Desafie outra pessoa conectada à mesma rede local.</small>
+            <span class="acao-modo">CONECTAR →</span>
+          </button>
+        </div>
+        <img class="personagem-jogar" src="img/sprites/laura-leafeon.png" alt="" loading="lazy" decoding="async">
+      </div>
+    </section>
+
+    <section class="tela campus" data-tela="multijogador" aria-labelledby="titulo-multijogador" aria-hidden="true"
+      inert>
+      <header class="cabecalho-tela">
+        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters" decoding="async">
+        <div class="titulo-cabecalho">
+          <span class="sobretitulo">REDE LOCAL</span>
           <h1 id="titulo-multijogador">Multijogador</h1>
+        </div>
+        <button class="botao-voltar selecionavel" type="button" data-acao="sair-sala">← VOLTAR</button>
+      </header>
+
+      <div class="conteudo-tela centralizar-conteudo">
+        <section class="painel-sala painel-referencia" aria-labelledby="titulo-conexao-sala">
+          <div class="icone-conexao" aria-hidden="true"><span></span><span></span><span></span></div>
+          <p class="sobretitulo">CONEXÃO DIRETA</p>
+          <h2 id="titulo-conexao-sala">Jogue com alguém no mesmo Wi-Fi</h2>
+          <p class="ajuda-rede">
+            Nos dois dispositivos, abra o endereço de rede mostrado no terminal do computador que iniciou o jogo.
+          </p>
+
           <div id="acoes-sala">
-            <button
-              class="botao-pixel selecionavel"
-              type="button"
-              data-acao="criar-sala"
-              data-foco-inicial
-            >
-              CRIAR SALA
-            </button>
+            <button class="botao-pixel botao-primario selecionavel" type="button" data-acao="criar-sala"
+              data-foco-inicial>CRIAR NOVA SALA</button>
+            <div class="separador-sala"><span>OU ENTRE COM UM CÓDIGO</span></div>
             <label for="codigo-sala">Código da sala</label>
-            <input
-              id="codigo-sala"
-              class="selecionavel"
-              type="text"
-              minlength="6"
-              maxlength="6"
-              pattern="[A-Za-z0-9]{6}"
-              autocomplete="off"
-              autocapitalize="characters"
-              spellcheck="false"
-              aria-describedby="ajuda-codigo-sala"
-            >
-            <small id="ajuda-codigo-sala" class="somente-leitores">
-              Digite os seis caracteres do código da sala.
+            <div class="linha-codigo-sala">
+              <input id="codigo-sala" class="selecionavel" type="text" minlength="6" maxlength="6"
+                pattern="[A-HJ-NP-Za-hj-np-z2-9]{6}" inputmode="text" autocomplete="off"
+                autocapitalize="characters" spellcheck="false" aria-describedby="ajuda-codigo-sala"
+                placeholder="ABC234">
+              <button class="botao-pixel selecionavel" type="button" data-acao="entrar-sala">ENTRAR →</button>
+            </div>
+            <small id="ajuda-codigo-sala">
+              Use os seis caracteres exibidos no dispositivo que criou a sala.
             </small>
-            <button
-              class="botao-pixel selecionavel"
-              type="button"
-              data-acao="entrar-sala"
-            >
-              ENTRAR
-            </button>
           </div>
+
           <div id="espera-sala" hidden>
-            <p id="status-sala" role="status" aria-live="polite">
-              Conectando…
-            </p>
-            <p>CÓDIGO: <strong id="codigo-sala-exibido">------</strong></p>
-            <button
-              class="botao-pixel selecionavel"
-              type="button"
-              data-acao="copiar-codigo"
-            >
-              COPIAR CÓDIGO
-            </button>
-            <button
-              class="botao-pixel selecionavel"
-              type="button"
-              data-acao="sair-sala"
-            >
-              CANCELAR
-            </button>
+            <span class="indicador-carregamento" aria-hidden="true"></span>
+            <p id="status-sala" role="status" aria-live="polite">Conectando…</p>
+            <div class="cartao-codigo">
+              <small>CÓDIGO DA SALA</small>
+              <strong id="codigo-sala-exibido">------</strong>
+            </div>
+            <div class="acoes-espera">
+              <button class="botao-pixel selecionavel" type="button" data-acao="copiar-codigo">COPIAR CÓDIGO</button>
+              <button class="botao-secundario selecionavel" type="button" data-acao="sair-sala">CANCELAR</button>
+            </div>
           </div>
-        </div>
-        <span class="canto-laranja" aria-hidden="true"></span>
-      </section>
+        </section>
+      </div>
+    </section>
 
-      <section
-        class="tela campus"
-        data-tela="equipe"
-        aria-labelledby="titulo-equipe"
-        aria-hidden="true"
-        inert
-      >
-        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <button
-          class="botao-voltar selecionavel"
-          type="button"
-          data-acao="voltar"
-        >
-          VOLTAR
-        </button>
-        <div class="painel-equipe painel-referencia">
-          <h1 id="titulo-equipe">Escolha seu IFighter</h1>
-          <div
-            id="lista-lutadores"
-            class="lista-lutadores"
-            role="group"
-            aria-label="Lutadores disponíveis"
-          ></div>
+    <section class="tela campus" data-tela="equipe" aria-labelledby="titulo-equipe" aria-hidden="true" inert>
+      <header class="cabecalho-tela">
+        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters" decoding="async">
+        <div class="titulo-cabecalho">
+          <span class="sobretitulo">PREPARAÇÃO</span>
+          <h1 id="titulo-equipe">Monte sua equipe</h1>
         </div>
-        <aside
-          id="previa-lutador"
-          class="previa-lutador painel-referencia"
-          aria-label="Lutador selecionado"
-          aria-live="polite"
-        ></aside>
-        <button
-          id="botao-confirmar-lutador"
-          class="botao-confirmar selecionavel"
-          type="button"
-          data-acao="confirmar-lutador"
-        >
-          CONFIRMAR
-        </button>
-      </section>
+        <button class="botao-voltar selecionavel" type="button" data-acao="voltar">← VOLTAR</button>
+      </header>
 
-      <section
-        class="tela campus"
-        data-tela="ifdex"
-        aria-labelledby="titulo-ifdex"
-        aria-hidden="true"
-        inert
-      >
-        <h1 id="titulo-ifdex" class="somente-leitores">IFdex</h1>
-        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <button
-          class="botao-voltar selecionavel"
-          type="button"
-          data-acao="voltar"
-        >
-          VOLTAR
-        </button>
-        <div class="painel-dex painel-referencia">
-          <button
-            class="seta-dex selecionavel"
-            type="button"
-            data-acao="ifdex-anterior"
-            aria-label="Lutador anterior"
-          >
-            <span aria-hidden="true">&lt;</span>
-          </button>
-          <div
-            id="grade-ifdex"
-            class="grade-ifdex"
-            role="group"
-            aria-label="Lutadores da IFdex"
-          ></div>
-          <button
-            class="seta-dex selecionavel"
-            type="button"
-            data-acao="ifdex-proximo"
-            aria-label="Próximo lutador"
-          >
-            <span aria-hidden="true">&gt;</span>
-          </button>
+      <div class="conteudo-tela layout-equipe">
+        <section class="painel-equipe painel-referencia" aria-labelledby="titulo-catalogo-equipe">
+          <div class="cabecalho-painel">
+            <div>
+              <p class="sobretitulo">CATÁLOGO DE LUTADORES</p>
+              <h2 id="titulo-catalogo-equipe">Escolha exatamente 3 IFighters</h2>
+            </div>
+            <output id="contador-equipe" class="contador-lista" aria-live="polite">0 de 0</output>
+          </div>
+          <p id="instrucao-equipe">O primeiro escolhido entra em campo; os outros dois ficam na reserva.</p>
+
+          <div class="ferramentas-lista">
+            <label class="campo-pesquisa" for="busca-equipe">
+              <span>BUSCAR LUTADOR</span>
+              <input id="busca-equipe" class="selecionavel" type="search" placeholder="Pessoa, Pokémon ou tipo"
+                autocomplete="off" aria-controls="lista-lutadores" data-foco-inicial>
+            </label>
+          </div>
+
+          <div id="lista-lutadores" class="lista-lutadores" role="group"
+            aria-label="Lutadores disponíveis para a equipe"
+            aria-describedby="instrucao-equipe status-equipe"></div>
+
+          <nav class="navegacao-paginada" aria-label="Páginas de lutadores">
+            <button class="botao-paginacao selecionavel" type="button" data-acao="equipe-anterior"
+              aria-label="Página anterior de lutadores">←</button>
+            <output id="paginacao-equipe" aria-live="polite">PÁGINA 1</output>
+            <button class="botao-paginacao selecionavel" type="button" data-acao="equipe-proximo"
+              aria-label="Próxima página de lutadores">→</button>
+          </nav>
+        </section>
+
+        <aside class="coluna-equipe" aria-label="Resumo da equipe">
+          <section id="previa-lutador" class="previa-lutador painel-referencia" aria-label="Lutador em destaque"
+            aria-live="polite"></section>
+          <section class="resumo-equipe painel-referencia" aria-labelledby="titulo-resumo-equipe">
+            <div class="cabecalho-resumo">
+              <div>
+                <p class="sobretitulo">SUA FORMAÇÃO</p>
+                <h2 id="titulo-resumo-equipe">Equipe escolhida</h2>
+              </div>
+              <span class="contador-vagas">3 VAGAS</span>
+            </div>
+            <div id="resumo-equipe" class="vagas-equipe" aria-live="polite"></div>
+            <p id="status-equipe" class="status-equipe" role="status" aria-live="polite"></p>
+            <button id="botao-confirmar-equipe" class="botao-confirmar selecionavel" type="button"
+              data-acao="confirmar-equipe">CONFIRMAR EQUIPE</button>
+          </section>
+        </aside>
+      </div>
+    </section>
+
+    <section class="tela campus" data-tela="ifdex" aria-labelledby="titulo-ifdex" aria-hidden="true" inert>
+      <header class="cabecalho-tela">
+        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters" decoding="async">
+        <div class="titulo-cabecalho">
+          <span class="sobretitulo">ARQUIVO DE LUTADORES</span>
+          <h1 id="titulo-ifdex">IFDEX</h1>
         </div>
-        <aside
-          id="detalhe-dex"
-          class="detalhe-dex painel-referencia"
-          aria-label="Detalhes do lutador"
-          aria-live="polite"
-        ></aside>
-        <span class="canto-laranja" aria-hidden="true"></span>
-      </section>
+        <button class="botao-voltar selecionavel" type="button" data-acao="voltar">← VOLTAR</button>
+      </header>
 
-      <section
-        class="tela campus"
-        data-tela="configuracoes"
-        aria-labelledby="titulo-configuracoes"
-        aria-hidden="true"
-        inert
-      >
-        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <button
-          class="botao-voltar selecionavel"
-          type="button"
-          data-acao="voltar"
-        >
-          VOLTAR
-        </button>
-        <div class="painel-configuracoes painel-referencia">
+      <div class="conteudo-tela layout-ifdex">
+        <section class="painel-dex painel-referencia" aria-labelledby="titulo-lista-ifdex">
+          <div class="cabecalho-ifdex">
+            <div>
+              <p class="sobretitulo">BANCO DE DADOS</p>
+              <h2 id="titulo-lista-ifdex">Todos os IFighters</h2>
+            </div>
+            <output id="contador-ifdex" class="contador-ifdex" for="busca-ifdex" aria-live="polite"></output>
+            <label class="campo-pesquisa" for="busca-ifdex">
+              <span>BUSCAR NA IFDEX</span>
+              <input id="busca-ifdex" class="campo-busca-ifdex selecionavel" type="search"
+                placeholder="Pessoa, Pokémon, tipo ou número" autocomplete="off" aria-controls="grade-ifdex"
+                data-foco-inicial>
+            </label>
+          </div>
+
+          <div id="grade-ifdex" class="grade-ifdex" role="group" aria-label="Lutadores da IFDEX"></div>
+
+          <nav class="navegacao-dex" aria-label="Navegação entre lutadores">
+            <button class="seta-dex selecionavel" type="button" data-acao="ifdex-anterior"
+              aria-label="Lutador anterior"><span aria-hidden="true">←</span> ANTERIOR</button>
+            <button class="seta-dex selecionavel" type="button" data-acao="ifdex-proximo"
+              aria-label="Próximo lutador">PRÓXIMO <span aria-hidden="true">→</span></button>
+          </nav>
+        </section>
+
+        <aside id="detalhe-dex" class="detalhe-dex painel-referencia" aria-label="Detalhes do lutador"
+          aria-live="polite"></aside>
+      </div>
+    </section>
+
+    <section class="tela campus" data-tela="configuracoes" aria-labelledby="titulo-configuracoes" aria-hidden="true"
+      inert>
+      <header class="cabecalho-tela">
+        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters" decoding="async">
+        <div class="titulo-cabecalho">
+          <span class="sobretitulo">PREFERÊNCIAS</span>
           <h1 id="titulo-configuracoes">Configurações</h1>
-          <p><kbd>↑ ↓ / W S</kbd><strong>Navegar</strong></p>
-          <p><kbd>ENTER / TOQUE</kbd><strong>Confirmar</strong></p>
-          <p><kbd>ESC / RETROCESSO</kbd><strong>Voltar</strong></p>
-          <label>
-            <input
-              id="alternar-animacoes"
-              class="selecionavel"
-              type="checkbox"
-              data-foco-inicial
-            >
-            <strong>Animações</strong>
-          </label>
-          <label>
-            <input
-              id="alternar-contraste"
-              class="selecionavel"
-              type="checkbox"
-            >
-            <strong>Alto contraste</strong>
-          </label>
-          <label>
-            <input
-              id="alternar-introducao"
-              class="selecionavel"
-              type="checkbox"
-            >
-            <strong>Reproduzir introdução ao abrir</strong>
-          </label>
-          <button
-            class="botao-pixel selecionavel"
-            type="button"
-            data-acao="rever-introducao"
-          >
-            REVER INTRODUÇÃO
-          </button>
         </div>
-        <span class="canto-laranja" aria-hidden="true"></span>
-      </section>
+        <button class="botao-voltar selecionavel" type="button" data-acao="voltar">← VOLTAR</button>
+      </header>
 
-      <section
-        class="tela campus"
-        data-tela="creditos"
-        aria-labelledby="titulo-creditos"
-        aria-hidden="true"
-        inert
-      >
-        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters">
-        <button
-          class="botao-voltar selecionavel"
-          type="button"
-          data-acao="voltar"
-        >
-          VOLTAR
-        </button>
-        <div class="painel-creditos painel-referencia">
+      <div class="conteudo-tela layout-configuracoes">
+        <section class="painel-configuracoes painel-referencia" aria-labelledby="titulo-acessibilidade">
+          <div class="cabecalho-painel">
+            <div>
+              <p class="sobretitulo">EXPERIÊNCIA</p>
+              <h2 id="titulo-acessibilidade">Acessibilidade e exibição</h2>
+            </div>
+          </div>
+          <div class="lista-configuracoes">
+            <label class="opcao-configuracao">
+              <span><strong>Animações</strong><small>Movimentos e transições durante a batalha.</small></span>
+              <input id="alternar-animacoes" class="selecionavel" type="checkbox" data-foco-inicial>
+            </label>
+            <label class="opcao-configuracao">
+              <span><strong>Alto contraste</strong><small>Remove o cenário e reforça cores e contornos.</small></span>
+              <input id="alternar-contraste" class="selecionavel" type="checkbox">
+            </label>
+            <label class="opcao-configuracao">
+              <span><strong>Introdução automática</strong><small>Reproduz o vídeo sempre que o jogo abrir.</small></span>
+              <input id="alternar-introducao" class="selecionavel" type="checkbox">
+            </label>
+          </div>
+          <button class="botao-pixel selecionavel" type="button" data-acao="rever-introducao">REVER INTRODUÇÃO</button>
+        </section>
+
+        <aside class="painel-controles painel-referencia" aria-labelledby="titulo-controles">
+          <p class="sobretitulo">ATALHOS</p>
+          <h2 id="titulo-controles">Controles</h2>
+          <dl class="lista-controles">
+            <div><dt><kbd>↑ ↓</kbd> <kbd>W S</kbd></dt><dd>Navegar</dd></div>
+            <div><dt><kbd>ENTER</kbd></dt><dd>Confirmar</dd></div>
+            <div><dt><kbd>ESC</kbd> <kbd>⌫</kbd></dt><dd>Voltar</dd></div>
+          </dl>
+          <p class="nota-controles">No celular, todos os controles respondem ao toque.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="tela campus" data-tela="creditos" aria-labelledby="titulo-creditos" aria-hidden="true" inert>
+      <header class="cabecalho-tela">
+        <img class="logotipo-canto" src="img/game/logo.png" alt="IFighters" decoding="async">
+        <div class="titulo-cabecalho">
+          <span class="sobretitulo">O PROJETO</span>
           <h1 id="titulo-creditos">Créditos</h1>
-          <p>IFIGHTERS</p>
-          <p>Projeto criado com a comunidade do IFRS.</p>
-          <p>Sprites, cenário e vídeo de introdução: acervo do projeto.</p>
         </div>
-      </section>
+        <button class="botao-voltar selecionavel" type="button" data-acao="voltar">← VOLTAR</button>
+      </header>
 
-      <section
-        class="tela batalha"
-        data-tela="batalha"
-        aria-labelledby="titulo-batalha"
-        aria-hidden="true"
-        inert
-      >
-        <h1 id="titulo-batalha" class="somente-leitores">Batalha</h1>
-        <div id="conteudo-batalha">
-          <button
-            class="botao-voltar selecionavel"
-            type="button"
-            data-acao="sair-batalha"
-          >
-            SAIR
-          </button>
-          <div id="cartao-inimigo" class="cartao-vida"></div>
-          <img
-            id="sprite-inimigo"
-            class="sprite-batalha inimigo"
-            alt=""
-          >
-          <img
-            id="sprite-jogador"
-            class="sprite-batalha jogador"
-            alt=""
-          >
-          <div id="cartao-jogador" class="cartao-vida cartao-jogador"></div>
-          <div class="caixa-batalha">
-            <p
-              id="mensagem-batalha"
-              role="status"
-              aria-live="polite"
-              aria-atomic="true"
-            ></p>
-            <div id="lista-golpes" class="lista-golpes"></div>
+      <div class="conteudo-tela layout-creditos painel-referencia">
+        <div class="imagem-creditos">
+          <img src="img/game/pessoas.png" alt="Estudantes reunidos no laboratório de informática" loading="lazy"
+            decoding="async">
+        </div>
+        <div class="texto-creditos">
+          <p class="sobretitulo">FEITO NO IFRS</p>
+          <h2>Um jogo com a cara do campus.</h2>
+          <p>IFighters nasceu da comunidade do IFRS e transforma pessoas do cotidiano em lutadores de uma arena própria.</p>
+          <div class="bloco-credito">
+            <span>PROJETO</span>
+            <strong>IFIGHTERS</strong>
+          </div>
+          <div class="bloco-credito">
+            <span>ARTE E MÍDIA</span>
+            <strong>Sprites, cenário e introdução do acervo do projeto</strong>
           </div>
         </div>
-        <div
-          id="resultado-batalha"
-          class="resultado painel-referencia"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="titulo-resultado"
-          aria-describedby="texto-resultado"
-          tabindex="-1"
-          hidden
-        >
-          <h1 id="titulo-resultado"></h1>
-          <p id="texto-resultado"></p>
-          <button
-            id="botao-revanche"
-            class="botao-pixel selecionavel"
-            type="button"
-            data-acao="solicitar-revanche"
-          >
-            REVANCHE
-          </button>
-          <button
-            class="botao-pixel selecionavel"
-            type="button"
-            data-acao="sair-batalha"
-          >
-            MENU
-          </button>
+      </div>
+    </section>
+
+    <section class="tela batalha" data-tela="batalha" aria-labelledby="titulo-batalha" aria-hidden="true" inert>
+      <h1 id="titulo-batalha" class="somente-leitores">Batalha</h1>
+      <div id="conteudo-batalha">
+        <header class="cabecalho-batalha">
+          <img src="img/game/logo.png" alt="IFighters" decoding="async">
+          <span class="estado-batalha"><i aria-hidden="true"></i> BATALHA EM ANDAMENTO</span>
+          <button class="botao-voltar selecionavel" type="button" data-acao="sair-batalha">SAIR</button>
+        </header>
+
+        <div class="arena-batalha">
+          <div id="cartao-inimigo" class="cartao-vida"></div>
+          <img id="sprite-inimigo" class="sprite-batalha inimigo" alt="">
+          <img id="sprite-jogador" class="sprite-batalha jogador" alt="">
+          <div id="cartao-jogador" class="cartao-vida cartao-jogador"></div>
         </div>
-      </section>
 
-      <div
-        id="aviso"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-        hidden
-      ></div>
-    </main>
+        <div class="caixa-batalha">
+          <div class="mensagem-turno">
+            <span class="rotulo-turno">COMANDO</span>
+            <p id="mensagem-batalha" role="status" aria-live="polite" aria-atomic="true"></p>
+            <ol id="log-batalha" class="log-batalha" aria-label="Últimos acontecimentos"></ol>
+          </div>
+          <div class="comandos-batalha">
+            <div id="menu-acoes-batalha" class="menu-acoes-batalha" role="group" aria-label="Ação da rodada">
+              <button class="selecionavel" type="button" data-acao="batalha-lutar" data-foco-inicial>
+                LUTAR
+              </button>
+              <button class="selecionavel" type="button" data-acao="batalha-pokemon">
+                POKÉMON
+              </button>
+            </div>
+            <section id="painel-golpes" class="painel-comando-batalha" aria-labelledby="titulo-golpes" hidden>
+              <div class="cabecalho-comando-batalha">
+                <h2 id="titulo-golpes">Escolha um ataque</h2>
+                <button class="botao-comando-voltar selecionavel" type="button" data-acao="batalha-voltar">← VOLTAR</button>
+              </div>
+              <div id="lista-golpes" class="lista-golpes"></div>
+            </section>
+            <section id="painel-equipe-batalha" class="painel-comando-batalha" aria-labelledby="titulo-equipe-batalha"
+              hidden>
+              <div class="cabecalho-comando-batalha">
+                <h2 id="titulo-equipe-batalha">Trocar Pokémon</h2>
+                <button class="botao-comando-voltar selecionavel" type="button" data-acao="batalha-voltar">← VOLTAR</button>
+              </div>
+              <div id="lista-equipe-batalha" class="lista-equipe-batalha" role="group"
+                aria-label="Equipe disponível para troca"></div>
+            </section>
+          </div>
+        </div>
+      </div>
 
-    <script src="data.js"></script>
-    <script src="protocol.js"></script>
-    <script src="regras-batalha.js"></script>
-    <script src="app.js"></script>
-  </body>
+      <div id="resultado-batalha" class="resultado painel-referencia" role="dialog" aria-modal="true"
+        aria-labelledby="titulo-resultado" aria-describedby="texto-resultado" tabindex="-1" hidden>
+        <span class="selo-resultado" aria-hidden="true">IF</span>
+        <h1 id="titulo-resultado"></h1>
+        <p id="texto-resultado"></p>
+        <div class="acoes-resultado">
+          <button id="botao-revanche" class="botao-pixel botao-primario selecionavel" type="button"
+            data-acao="solicitar-revanche">REVANCHE</button>
+          <button class="botao-secundario selecionavel" type="button" data-acao="sair-batalha">MENU</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="aviso" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  </main>
+
+  <script src="data.js"></script>
+  <script src="protocol.js"></script>
+  <script src="regras-batalha.js"></script>
+  <script src="app.js"></script>
+</body>
+
 </html>

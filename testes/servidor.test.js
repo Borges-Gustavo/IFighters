@@ -1,20 +1,27 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const http = require("node:http");
-const { once } = require("node:events");
 const test = require("node:test");
-const WebSocket = require("ws");
 
+const LUTADORES = require("../data");
 const EVENTOS = require("../protocol");
 const { criarServidor } = require("../server");
 
 const TEMPO_LIMITE = 2_000;
 
-function requisitar(porta, caminho, metodo = "GET") {
+function requisitar(
+  porta,
+  caminho,
+  metodo = "GET",
+  cabecalhos = {},
+  corpo = null,
+) {
   return new Promise((resolver, rejeitar) => {
     const requisicao = http.request(
       {
         agent: false,
         host: "127.0.0.1",
+        headers: cabecalhos,
         method: metodo,
         path: caminho,
         port: porta,
@@ -23,23 +30,33 @@ function requisitar(porta, caminho, metodo = "GET") {
         const partes = [];
         resposta.on("data", (parte) => partes.push(parte));
         resposta.on("end", () => {
+          const buffer = Buffer.concat(partes);
           resolver({
+            buffer,
             cabecalhos: resposta.headers,
             codigo: resposta.statusCode,
-            corpo: Buffer.concat(partes).toString("utf8"),
+            corpo: buffer.toString("utf8"),
           });
         });
       },
     );
 
     requisicao.on("error", rejeitar);
+    if (corpo !== null) {
+      requisicao.write(corpo);
+    }
     requisicao.end();
   });
+}
+
+function interpretarJson(resposta) {
+  return resposta.corpo ? JSON.parse(resposta.corpo) : {};
 }
 
 async function iniciarAplicacao(contexto, opcoes = {}) {
   const aplicacao = criarServidor({
     aleatorio: () => 0,
+    host: "127.0.0.1",
     porta: 0,
     ...opcoes,
   });
@@ -52,80 +69,226 @@ async function iniciarAplicacao(contexto, opcoes = {}) {
 }
 
 async function conectarCliente(contexto, porta) {
-  const conexao = new WebSocket(`ws://127.0.0.1:${porta}`);
+  const criacao = await requisitar(
+    porta,
+    "/api/multijogador/sessoes",
+    "POST",
+  );
+  assert.equal(criacao.codigo, 201);
+  const credenciais = interpretarJson(criacao);
+  assert.match(credenciais.sessaoId, /^[\w-]{43}$/);
+  assert.match(credenciais.chaveSessao, /^[\w-]{43}$/);
+
   const fila = [];
-  const esperas = [];
+  let ultimoEventoId = 0;
+  let numeroTurno = 0;
+  let filaEnvio = Promise.resolve();
+  let fechada = false;
 
-  conexao.on("message", (conteudo) => {
-    const mensagem = JSON.parse(conteudo.toString("utf8"));
-    const indiceEspera = esperas.findIndex(
-      (espera) => !espera.tipo || espera.tipo === mensagem.tipo,
-    );
+  const cabecalhosAutenticados = {
+    Authorization: `Bearer ${credenciais.chaveSessao}`,
+  };
 
-    if (indiceEspera === -1) {
-      fila.push(mensagem);
-      return;
+  function absorverEventos(resposta) {
+    const dados = interpretarJson(resposta);
+    for (const evento of dados.eventos || []) {
+      if (evento.id <= ultimoEventoId) {
+        continue;
+      }
+      ultimoEventoId = evento.id;
+      if (Number.isInteger(evento.dados?.estado?.numeroTurno)) {
+        numeroTurno = evento.dados.estado.numeroTurno;
+      }
+      fila.push({ dados: evento.dados, tipo: evento.tipo });
     }
+    return resposta;
+  }
 
-    const [espera] = esperas.splice(indiceEspera, 1);
-    clearTimeout(espera.temporizador);
-    espera.resolver(mensagem);
-  });
+  function enviar(
+    tipo,
+    dados = {},
+    { idComando = crypto.randomUUID() } = {},
+  ) {
+    const dadosCompletos =
+      tipo === EVENTOS.ESCOLHER_ACAO &&
+      dados &&
+      typeof dados === "object" &&
+      !Array.isArray(dados) &&
+      dados.numeroTurno === undefined
+        ? { ...dados, numeroTurno }
+        : dados;
 
-  await once(conexao, "open");
+    return enviarConteudo(JSON.stringify({
+      dados: dadosCompletos,
+      desde: ultimoEventoId,
+      idComando,
+      tipo,
+    }));
+  }
 
-  function receber(tipo, tempoLimite = TEMPO_LIMITE) {
-    const indiceMensagem = fila.findIndex(
-      (mensagem) => !tipo || mensagem.tipo === tipo,
-    );
-    if (indiceMensagem !== -1) {
-      return Promise.resolve(fila.splice(indiceMensagem, 1)[0]);
-    }
-
-    return new Promise((resolver, rejeitar) => {
-      const espera = {
-        rejeitar,
-        resolver,
-        tipo,
-        temporizador: setTimeout(() => {
-          const indice = esperas.indexOf(espera);
-          if (indice !== -1) {
-            esperas.splice(indice, 1);
-          }
-          rejeitar(
-            new Error(`Tempo esgotado aguardando o evento ${tipo || "seguinte"}.`),
-          );
-        }, tempoLimite),
-      };
-      esperas.push(espera);
+  function enviarConteudo(conteudo, tipoConteudo = "application/json") {
+    filaEnvio = filaEnvio.then(async () => {
+      const resposta = await requisitar(
+        porta,
+        `/api/multijogador/sessoes/${credenciais.sessaoId}/eventos`,
+        "POST",
+        {
+          ...cabecalhosAutenticados,
+          "Content-Type": tipoConteudo,
+        },
+        conteudo,
+      );
+      absorverEventos(resposta);
+      return resposta;
     });
+    return filaEnvio;
   }
 
-  function enviar(tipo, dados = {}) {
-    conexao.send(JSON.stringify({ tipo, dados }));
+  async function atualizarEventos() {
+    await filaEnvio;
+    const resposta = await requisitar(
+      porta,
+      `/api/multijogador/sessoes/${credenciais.sessaoId}/eventos?desde=${ultimoEventoId}`,
+      "GET",
+      cabecalhosAutenticados,
+    );
+    assert.equal(resposta.codigo, 200);
+    absorverEventos(resposta);
   }
 
-  function enviarConteudo(conteudo) {
-    conexao.send(conteudo);
+  async function receber(tipo, tempoLimite = TEMPO_LIMITE) {
+    const limite = Date.now() + tempoLimite;
+    while (Date.now() < limite) {
+      const indiceMensagem = fila.findIndex(
+        (mensagem) => !tipo || mensagem.tipo === tipo,
+      );
+      if (indiceMensagem !== -1) {
+        return fila.splice(indiceMensagem, 1)[0];
+      }
+
+      await atualizarEventos();
+      if (!fila.length) {
+        await new Promise((resolver) => setTimeout(resolver, 10));
+      }
+    }
+
+    throw new Error(
+      `Tempo esgotado aguardando o evento ${tipo || "seguinte"}.`,
+    );
   }
 
   async function fechar() {
-    if (conexao.readyState === WebSocket.CLOSED) {
+    if (fechada) {
       return;
     }
-
-    const fechou = once(conexao, "close");
-    if (conexao.readyState === WebSocket.OPEN) {
-      conexao.close();
-    } else {
-      conexao.terminate();
+    fechada = true;
+    await filaEnvio;
+    try {
+      await requisitar(
+        porta,
+        `/api/multijogador/sessoes/${credenciais.sessaoId}`,
+        "DELETE",
+        cabecalhosAutenticados,
+      );
+    } catch {
+      // O encerramento global do servidor pode ocorrer antes da limpeza do teste.
     }
-    await fechou;
+  }
+
+  function abandonar() {
+    fechada = true;
   }
 
   contexto.after(fechar);
-  return { conexao, enviar, enviarConteudo, fechar, receber };
+  absorverEventos(criacao);
+  return {
+    abandonar,
+    credenciais,
+    enviar,
+    enviarConteudo,
+    fechar,
+    receber,
+  };
 }
+
+const EQUIPES = Object.freeze({
+  primeira: ["leonardo", "eraldo", "laura"],
+  segunda: ["dalcin", "kurt", "flores"],
+});
+
+function obterLutador(lutadorId) {
+  return LUTADORES.find((lutador) => lutador.id === lutadorId);
+}
+
+function indiceDoGolpeMaisForte(lutadorId) {
+  const lutador = obterLutador(lutadorId);
+  return lutador.golpes.reduce(
+    (melhor, golpe, indice) =>
+      golpe.poder > lutador.golpes[melhor].poder ? indice : melhor,
+    0,
+  );
+}
+
+function obterJogadorNoEstado(estado, jogadorId) {
+  return estado.jogadores.find((jogador) => jogador.id === jogadorId);
+}
+
+async function prepararBatalha(primeiro, segundo) {
+  const conexaoPrimeiro = await primeiro.receber(EVENTOS.CONEXAO);
+  const conexaoSegundo = await segundo.receber(EVENTOS.CONEXAO);
+
+  primeiro.enviar(EVENTOS.CRIAR_SALA);
+  const codigo = (await primeiro.receber(EVENTOS.SALA_CRIADA)).dados.codigo;
+  segundo.enviar(EVENTOS.ENTRAR_SALA, { codigo: codigo.toLowerCase() });
+  await Promise.all([
+    primeiro.receber(EVENTOS.SALA_ENTRADA),
+    segundo.receber(EVENTOS.SALA_ENTRADA),
+  ]);
+
+  primeiro.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.primeira,
+  });
+  await primeiro.receber(EVENTOS.ACAO_ACEITA);
+  segundo.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.segunda,
+  });
+  await segundo.receber(EVENTOS.ACAO_ACEITA);
+  const [inicioPrimeiro, inicioSegundo] = await Promise.all([
+    primeiro.receber(EVENTOS.BATALHA_INICIADA),
+    segundo.receber(EVENTOS.BATALHA_INICIADA),
+  ]);
+
+  assert.deepEqual(inicioPrimeiro, inicioSegundo);
+  return {
+    codigo,
+    conexaoPrimeiro: conexaoPrimeiro.dados,
+    conexaoSegundo: conexaoSegundo.dados,
+    estado: inicioPrimeiro.dados.estado,
+  };
+}
+
+async function enviarAcoes(primeiro, acaoPrimeiro, segundo, acaoSegundo) {
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, { acao: acaoPrimeiro });
+  await primeiro.receber(EVENTOS.ACAO_ACEITA);
+  segundo.enviar(EVENTOS.ESCOLHER_ACAO, { acao: acaoSegundo });
+  await segundo.receber(EVENTOS.ACAO_ACEITA);
+
+  const [resultadoPrimeiro, resultadoSegundo] = await Promise.all([
+    primeiro.receber(),
+    segundo.receber(),
+  ]);
+  assert.deepEqual(resultadoPrimeiro, resultadoSegundo);
+  return resultadoPrimeiro;
+}
+
+test("o servidor escuta a rede local por padrão", async (contexto) => {
+  const aplicacao = criarServidor({ porta: 0 });
+  contexto.after(() => aplicacao.encerrar());
+  const endereco = await aplicacao.iniciar();
+
+  assert.equal(endereco.address, "0.0.0.0");
+  assert.equal(endereco.family, "IPv4");
+});
 
 test("o HTTP entrega apenas recursos públicos e trata caminhos hostis", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
@@ -136,11 +299,42 @@ test("o HTTP entrega apenas recursos públicos e trata caminhos hostis", async (
   assert.match(pagina.cabecalhos["content-type"], /^text\/html/);
   assert.equal(pagina.cabecalhos["x-content-type-options"], "nosniff");
   assert.match(pagina.cabecalhos["content-security-policy"], /default-src 'self'/);
+  assert.match(pagina.cabecalhos["content-security-policy"], /style-src 'self'/);
+  assert.doesNotMatch(
+    pagina.cabecalhos["content-security-policy"],
+    /unsafe-inline/,
+  );
+  assert.doesNotMatch(
+    pagina.cabecalhos["content-security-policy"],
+    /\bwss?:/,
+  );
 
   const cabecalho = await requisitar(porta, "/style.css", "HEAD");
   assert.equal(cabecalho.codigo, 200);
   assert.equal(cabecalho.corpo, "");
   assert.ok(Number(cabecalho.cabecalhos["content-length"]) > 0);
+  assert.equal(cabecalho.cabecalhos["accept-ranges"], "bytes");
+
+  const faixaVideo = await requisitar(
+    porta,
+    "/img/game/introducao.mp4",
+    "GET",
+    { Range: "bytes=0-99" },
+  );
+  assert.equal(faixaVideo.codigo, 206);
+  assert.equal(faixaVideo.buffer.length, 100);
+  assert.match(faixaVideo.cabecalhos["content-type"], /^video\/mp4/);
+  assert.match(faixaVideo.cabecalhos["content-range"], /^bytes 0-99\/\d+$/);
+
+  const faixaInvalida = await requisitar(
+    porta,
+    "/img/game/introducao.mp4",
+    "GET",
+    { Range: "bytes=999999999-" },
+  );
+  assert.equal(faixaInvalida.codigo, 416);
+  assert.equal(faixaInvalida.buffer.length, 0);
+  assert.match(faixaInvalida.cabecalhos["content-range"], /^bytes \*\/\d+$/);
 
   for (const caminhoPrivado of [
     "/server.js",
@@ -167,89 +361,258 @@ test("o HTTP entrega apenas recursos públicos e trata caminhos hostis", async (
   assert.equal(metodoInvalido.corpo, "Método não permitido.");
 });
 
-test("duas pessoas completam batalha, revanche e saída", async (contexto) => {
+test("a API cria sessões HTTP autenticadas e informa a rede local", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const status = await requisitar(porta, "/api/multijogador/status");
+  assert.equal(status.codigo, 200);
+  assert.deepEqual(
+    {
+      transporte: interpretarJson(status).transporte,
+      versaoProtocolo: interpretarJson(status).versaoProtocolo,
+    },
+    { transporte: "http", versaoProtocolo: 4 },
+  );
+  assert.ok(Array.isArray(interpretarJson(status).enderecosRede));
+
+  const criacao = await requisitar(
+    porta,
+    "/api/multijogador/sessoes",
+    "POST",
+  );
+  const sessao = interpretarJson(criacao);
+  const caminho = `/api/multijogador/sessoes/${sessao.sessaoId}/eventos`;
+
+  assert.equal((await requisitar(porta, caminho)).codigo, 401);
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${"x".repeat(43)}`,
+      })
+    ).codigo,
+    401,
+  );
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${"é".repeat(43)}`,
+      })
+    ).codigo,
+    401,
+  );
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${sessao.chaveSessao}`,
+      })
+    ).codigo,
+    200,
+  );
+  assert.equal(
+    (
+      await requisitar(porta, `${caminho}?desde=999`, "GET", {
+        Authorization: `Bearer ${sessao.chaveSessao}`,
+      })
+    ).codigo,
+    400,
+  );
+
+  const exclusao = await requisitar(
+    porta,
+    `/api/multijogador/sessoes/${sessao.sessaoId}`,
+    "DELETE",
+    { Authorization: `Bearer ${sessao.chaveSessao}` },
+  );
+  assert.equal(exclusao.codigo, 204);
+  assert.equal(
+    (
+      await requisitar(porta, caminho, "GET", {
+        Authorization: `Bearer ${sessao.chaveSessao}`,
+      })
+    ).codigo,
+    401,
+  );
+});
+
+test("a API multiplayer rejeita requisições de outra origem", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const resposta = await requisitar(
+    porta,
+    "/api/multijogador/sessoes",
+    "POST",
+    { Origin: "https://site-malicioso.invalid" },
+  );
+  assert.equal(resposta.codigo, 403);
+  assert.equal(interpretarJson(resposta).erro, "Origem não permitida.");
+});
+
+test("comandos repetidos são idempotentes e IDs conflitantes são recusados", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const cliente = await conectarCliente(contexto, porta);
+  await cliente.receber(EVENTOS.CONEXAO);
+  const idComando = crypto.randomUUID();
+
+  const primeiraResposta = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    {},
+    { idComando },
+  );
+  assert.equal(primeiraResposta.codigo, 200);
+  const salaCriada = await cliente.receber(EVENTOS.SALA_CRIADA);
+  assert.match(salaCriada.dados.codigo, /^[A-HJ-NP-Z2-9]{6}$/);
+
+  const repeticao = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    {},
+    { idComando },
+  );
+  assert.equal(repeticao.codigo, primeiraResposta.codigo);
+  assert.deepEqual(interpretarJson(repeticao).eventos, []);
+
+  const conflito = await cliente.enviar(
+    EVENTOS.SAIR_SALA,
+    {},
+    { idComando },
+  );
+  assert.equal(conflito.codigo, 409);
+  const erroConflito = await cliente.receber(EVENTOS.ERRO_SALA);
+  assert.match(erroConflito.dados.mensagem, /outro conteúdo/);
+  assert.equal(erroConflito.dados.recuperavel, false);
+
+  const idComandoOrdenado = crypto.randomUUID();
+  const comandoInvalido = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    { segundo: 2, primeiro: { beta: true, alfa: false } },
+    { idComando: idComandoOrdenado },
+  );
+  assert.equal(comandoInvalido.codigo, 200);
+  assert.equal(
+    (await cliente.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Dados inválidos para criar a sala.",
+  );
+
+  const repeticaoComOrdemDiferente = await cliente.enviar(
+    EVENTOS.CRIAR_SALA,
+    { primeiro: { alfa: false, beta: true }, segundo: 2 },
+    { idComando: idComandoOrdenado },
+  );
+  assert.equal(repeticaoComOrdemDiferente.codigo, comandoInvalido.codigo);
+  assert.deepEqual(
+    interpretarJson(repeticaoComOrdemDiferente).eventos,
+    [],
+  );
+
+  cliente.enviar(EVENTOS.CRIAR_SALA);
+  assert.equal(
+    (await cliente.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Você já está em uma sala.",
+  );
+});
+
+test("equipes trocam, lutam até o fim, reiniciam e saem", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
   const primeiro = await conectarCliente(contexto, porta);
   const segundo = await conectarCliente(contexto, porta);
+  const preparada = await prepararBatalha(primeiro, segundo);
+  const { conexaoPrimeiro, conexaoSegundo } = preparada;
 
-  const conexaoPrimeiro = await primeiro.receber(EVENTOS.CONEXAO);
-  const conexaoSegundo = await segundo.receber(EVENTOS.CONEXAO);
-  assert.match(conexaoPrimeiro.dados.jogadorId, /^[0-9a-f-]{36}$/i);
-  assert.match(conexaoSegundo.dados.jogadorId, /^[0-9a-f-]{36}$/i);
-  assert.notEqual(
-    conexaoPrimeiro.dados.jogadorId,
-    conexaoSegundo.dados.jogadorId,
-  );
-
-  primeiro.enviar(EVENTOS.CRIAR_SALA);
-  const salaCriada = await primeiro.receber(EVENTOS.SALA_CRIADA);
-  assert.match(salaCriada.dados.codigo, /^[A-Z2-9]{6}$/);
-
-  segundo.enviar(EVENTOS.ENTRAR_SALA, {
-    codigo: salaCriada.dados.codigo.toLowerCase(),
-  });
-  const [entradaPrimeiro, entradaSegundo] = await Promise.all([
-    primeiro.receber(EVENTOS.SALA_ENTRADA),
-    segundo.receber(EVENTOS.SALA_ENTRADA),
-  ]);
-  assert.equal(entradaPrimeiro.dados.codigo, salaCriada.dados.codigo);
-  assert.deepEqual(entradaPrimeiro, entradaSegundo);
-
-  primeiro.enviar(EVENTOS.SELECIONAR_LUTADOR, { lutadorId: "leonardo" });
-  assert.equal(
-    (await primeiro.receber(EVENTOS.ACAO_ACEITA)).tipo,
-    EVENTOS.ACAO_ACEITA,
-  );
-
-  segundo.enviar(EVENTOS.SELECIONAR_LUTADOR, { lutadorId: "dalcin" });
-  await segundo.receber(EVENTOS.ACAO_ACEITA);
-  const [inicioPrimeiro, inicioSegundo] = await Promise.all([
-    primeiro.receber(EVENTOS.BATALHA_INICIADA),
-    segundo.receber(EVENTOS.BATALHA_INICIADA),
-  ]);
-  assert.deepEqual(inicioPrimeiro, inicioSegundo);
-  assert.equal(inicioPrimeiro.dados.estado.situacao, "batalha");
+  assert.match(conexaoPrimeiro.jogadorId, /^[0-9a-f-]{36}$/i);
+  assert.match(conexaoPrimeiro.tokenReconexao, /^[\w-]{43}$/);
+  assert.equal(conexaoPrimeiro.versaoProtocolo, 4);
+  assert.notEqual(conexaoPrimeiro.jogadorId, conexaoSegundo.jogadorId);
+  assert.match(preparada.codigo, /^[A-HJ-NP-Z2-9]{6}$/);
+  assert.equal(preparada.estado.situacao, "batalha");
+  assert.equal(preparada.estado.numeroTurno, 1);
   assert.deepEqual(
-    inicioPrimeiro.dados.estado.jogadores.map((jogador) => jogador.lutadorId),
+    preparada.estado.jogadores.map((jogador) => jogador.lutadorAtivoId),
     ["leonardo", "dalcin"],
   );
-
-  primeiro.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: 3 });
-  await primeiro.receber(EVENTOS.ACAO_ACEITA);
-  primeiro.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: 0 });
-  assert.equal(
-    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
-    "Você já escolheu um golpe neste turno.",
-  );
-  segundo.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: 0 });
-  await segundo.receber(EVENTOS.ACAO_ACEITA);
-  const [turnoPrimeiro, turnoSegundo] = await Promise.all([
-    primeiro.receber(EVENTOS.RESULTADO_TURNO),
-    segundo.receber(EVENTOS.RESULTADO_TURNO),
-  ]);
-
-  assert.deepEqual(turnoPrimeiro, turnoSegundo);
-  assert.equal(turnoPrimeiro.dados.estado.situacao, "batalha");
-  assert.equal(turnoPrimeiro.dados.registros.length, 2);
-  assert.match(turnoPrimeiro.dados.registros[0], /^Leonardo usou Ataque Rápido/);
   assert.ok(
-    turnoPrimeiro.dados.estado.jogadores.every(
-      (jogador) => jogador.vidaAtual > 0,
+    preparada.estado.jogadores.every(
+      (jogador) =>
+        jogador.equipe.length === 3 &&
+        jogador.equipe.every((membro) => membro.vidaAtual > 0),
     ),
   );
+  assert.doesNotMatch(JSON.stringify(preparada.estado), /tokenReconexao/);
 
-  primeiro.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: 3 });
-  await primeiro.receber(EVENTOS.ACAO_ACEITA);
-  segundo.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: 0 });
-  await segundo.receber(EVENTOS.ACAO_ACEITA);
-  const [fimPrimeiro, fimSegundo] = await Promise.all([
-    primeiro.receber(EVENTOS.BATALHA_ENCERRADA),
-    segundo.receber(EVENTOS.BATALHA_ENCERRADA),
-  ]);
-  assert.deepEqual(fimPrimeiro, fimSegundo);
-  assert.equal(fimPrimeiro.dados.estado.situacao, "encerrada");
-  assert.equal(fimPrimeiro.dados.vencedorId, conexaoPrimeiro.dados.jogadorId);
-  assert.equal(fimPrimeiro.dados.registros.length, 1);
+  const primeiroTurno = await enviarAcoes(
+    primeiro,
+    { tipo: "troca", lutadorId: "eraldo" },
+    segundo,
+    {
+      tipo: "golpe",
+      indiceGolpe: indiceDoGolpeMaisForte("dalcin"),
+    },
+  );
+  assert.equal(primeiroTurno.tipo, EVENTOS.RESULTADO_TURNO);
+  assert.equal(primeiroTurno.dados.numeroTurno, 1);
+  assert.equal(primeiroTurno.dados.estado.numeroTurno, 2);
+  assert.match(primeiroTurno.dados.registros[0], /recuou/);
+  const jogadorPrimeiro = obterJogadorNoEstado(
+    primeiroTurno.dados.estado,
+    conexaoPrimeiro.jogadorId,
+  );
+  assert.equal(jogadorPrimeiro.lutadorAtivoId, "eraldo");
+  assert.equal(
+    jogadorPrimeiro.equipe.find((membro) => membro.lutadorId === "leonardo")
+      .vidaAtual,
+    obterLutador("leonardo").atributos.vida,
+  );
+  assert.ok(
+    jogadorPrimeiro.equipe.find((membro) => membro.lutadorId === "eraldo")
+      .vidaAtual < obterLutador("eraldo").atributos.vida,
+  );
+
+  let eventoFinal = primeiroTurno;
+  let houveEntradaAutomatica = false;
+  for (let turno = 0; turno < 100; turno += 1) {
+    if (eventoFinal.tipo === EVENTOS.BATALHA_ENCERRADA) {
+      break;
+    }
+
+    const estado = eventoFinal.dados.estado;
+    const ativoPrimeiro = obterJogadorNoEstado(
+      estado,
+      conexaoPrimeiro.jogadorId,
+    ).lutadorAtivoId;
+    const ativoSegundo = obterJogadorNoEstado(
+      estado,
+      conexaoSegundo.jogadorId,
+    ).lutadorAtivoId;
+    eventoFinal = await enviarAcoes(
+      primeiro,
+      {
+        tipo: "golpe",
+        indiceGolpe: indiceDoGolpeMaisForte(ativoPrimeiro),
+      },
+      segundo,
+      {
+        tipo: "golpe",
+        indiceGolpe: indiceDoGolpeMaisForte(ativoSegundo),
+      },
+    );
+    houveEntradaAutomatica ||=
+      eventoFinal.dados.registros.some((registro) =>
+        /foi derrotado/.test(registro),
+      ) &&
+      eventoFinal.dados.registros.some((registro) =>
+        /entrou na batalha/.test(registro),
+      );
+  }
+
+  assert.equal(eventoFinal.tipo, EVENTOS.BATALHA_ENCERRADA);
+  assert.equal(eventoFinal.dados.estado.situacao, "encerrada");
+  assert.ok(
+    [conexaoPrimeiro.jogadorId, conexaoSegundo.jogadorId].includes(
+      eventoFinal.dados.vencedorId,
+    ),
+  );
+  assert.ok(
+    eventoFinal.dados.estado.jogadores.some((jogador) =>
+      jogador.equipe.every((membro) => membro.vidaAtual === 0),
+    ),
+  );
+  assert.equal(houveEntradaAutomatica, true);
 
   primeiro.enviar(EVENTOS.SOLICITAR_REVANCHE);
   const [revanchePrimeiro, revancheSegundo] = await Promise.all([
@@ -273,14 +636,24 @@ test("duas pessoas completam batalha, revanche e saída", async (contexto) => {
   ]);
   assert.deepEqual(reinicioPrimeiro, reinicioSegundo);
   assert.equal(reinicioPrimeiro.dados.estado.situacao, "batalha");
+  assert.equal(reinicioPrimeiro.dados.estado.numeroTurno, 1);
   assert.deepEqual(
     reinicioPrimeiro.dados.estado.jogadores.map((jogador) => jogador.revanche),
     [false, false],
   );
+  for (const jogador of reinicioPrimeiro.dados.estado.jogadores) {
+    for (const membro of jogador.equipe) {
+      assert.equal(
+        membro.vidaAtual,
+        obterLutador(membro.lutadorId).atributos.vida,
+      );
+    }
+  }
 
   segundo.enviar(EVENTOS.SAIR_SALA);
   const desconexao = await primeiro.receber(EVENTOS.OPONENTE_DESCONECTADO);
   assert.equal(desconexao.dados.mensagem, "O adversário saiu da sala.");
+  assert.equal(desconexao.dados.temporario, false);
 
   segundo.enviar(EVENTOS.CRIAR_SALA);
   assert.equal(
@@ -289,7 +662,7 @@ test("duas pessoas completam batalha, revanche e saída", async (contexto) => {
   );
 });
 
-test("o WebSocket rejeita mensagens e identificadores inválidos sem corromper a sala", async (contexto) => {
+test("a API HTTP valida envelopes, equipes e ações sem corromper a sala", async (contexto) => {
   const { porta } = await iniciarAplicacao(contexto);
   const primeiro = await conectarCliente(contexto, porta);
   await primeiro.receber(EVENTOS.CONEXAO);
@@ -300,18 +673,40 @@ test("o WebSocket rejeita mensagens e identificadores inválidos sem corromper a
     /JSON válido/,
   );
 
-  primeiro.enviarConteudo(JSON.stringify({ tipo: "evento_inexistente", dados: {} }));
+  const semIdentificador = await primeiro.enviarConteudo(
+    JSON.stringify({ dados: {}, desde: 0, tipo: EVENTOS.CRIAR_SALA }),
+  );
+  assert.equal(semIdentificador.codigo, 400);
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "A requisição de evento é inválida.",
+  );
+
+  primeiro.enviar("evento_inexistente");
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
     "Evento desconhecido.",
   );
 
-  primeiro.enviarConteudo(
-    JSON.stringify({ tipo: EVENTOS.CRIAR_SALA, dados: [] }),
-  );
+  primeiro.enviar(EVENTOS.CRIAR_SALA, []);
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
     "Os dados do evento devem ser um objeto.",
+  );
+
+  primeiro.enviar(EVENTOS.SALA_CRIADA, { codigo: "AAAAAA" });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Esse evento não pode ser enviado pelo cliente.",
+  );
+
+  primeiro.enviarConteudo(
+    Buffer.from("mensagem binária"),
+    "application/octet-stream",
+  );
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Os eventos devem ser enviados como JSON.",
   );
 
   primeiro.enviar(EVENTOS.CRIAR_SALA);
@@ -338,30 +733,399 @@ test("o WebSocket rejeita mensagens e identificadores inválidos sem corromper a
     "A sala está cheia.",
   );
 
-  primeiro.enviar(EVENTOS.SELECIONAR_LUTADOR, { lutadorId: "toString" });
+  primeiro.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: ["leonardo", "leonardo", "toString"],
+  });
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
-    "Seleção de lutador inválida.",
+    "Selecione exatamente três lutadores diferentes.",
   );
 
-  primeiro.enviar(EVENTOS.SELECIONAR_LUTADOR, { lutadorId: "leonardo" });
+  primeiro.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.primeira,
+  });
   await primeiro.receber(EVENTOS.ACAO_ACEITA);
-  segundo.enviar(EVENTOS.SELECIONAR_LUTADOR, { lutadorId: "dalcin" });
+  segundo.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.segunda,
+  });
   await segundo.receber(EVENTOS.ACAO_ACEITA);
   await Promise.all([
     primeiro.receber(EVENTOS.BATALHA_INICIADA),
     segundo.receber(EVENTOS.BATALHA_INICIADA),
   ]);
 
-  primeiro.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: "map" });
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: "map" },
+  });
   assert.equal(
     (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
-    "Índice de golpe inválido.",
+    "Ação de batalha inválida.",
   );
 
-  primeiro.enviar(EVENTOS.ESCOLHER_GOLPE, { indiceGolpe: 0 });
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "troca", lutadorId: "leonardo" },
+  });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Ação de batalha inválida.",
+  );
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+  });
   assert.equal(
     (await primeiro.receber(EVENTOS.ACAO_ACEITA)).tipo,
     EVENTOS.ACAO_ACEITA,
   );
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "troca", lutadorId: "eraldo" },
+  });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Você já escolheu uma ação neste turno.",
+  );
+
+  segundo.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "troca", lutadorId: "kurt" },
+  });
+  await segundo.receber(EVENTOS.ACAO_ACEITA);
+  const [resultadoPrimeiro, resultadoSegundo] = await Promise.all([
+    primeiro.receber(EVENTOS.RESULTADO_TURNO),
+    segundo.receber(EVENTOS.RESULTADO_TURNO),
+  ]);
+  assert.deepEqual(resultadoPrimeiro, resultadoSegundo);
+  assert.equal(
+    obterJogadorNoEstado(
+      resultadoPrimeiro.dados.estado,
+      resultadoPrimeiro.dados.estado.jogadores[1].id,
+    ).lutadorAtivoId,
+    "kurt",
+  );
+});
+
+test("eventos fora de ordem são recusados sem alterar a sessão", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const primeiro = await conectarCliente(contexto, porta);
+  await primeiro.receber(EVENTOS.CONEXAO);
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+  });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Entre em uma sala primeiro.",
+  );
+
+  primeiro.enviar(EVENTOS.ENTRAR_SALA, { codigo: "AAAAAA" });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Sala inexistente.",
+  );
+
+  primeiro.enviar(EVENTOS.CRIAR_SALA, { campoExtra: true });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Dados inválidos para criar a sala.",
+  );
+
+  primeiro.enviar(EVENTOS.CRIAR_SALA);
+  await primeiro.receber(EVENTOS.SALA_CRIADA);
+  primeiro.enviar(EVENTOS.CRIAR_SALA);
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Você já está em uma sala.",
+  );
+
+  primeiro.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.primeira,
+  });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "A sala não está na etapa de seleção.",
+  );
+
+  primeiro.enviar(EVENTOS.SOLICITAR_REVANCHE);
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "A revanche só pode ser solicitada após a batalha.",
+  );
+});
+
+test("retries e ações atrasadas não antecipam o turno seguinte", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  await prepararBatalha(primeiro, segundo);
+  const idComando = crypto.randomUUID();
+  const acaoTurnoUm = {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+    numeroTurno: 1,
+  };
+
+  await primeiro.enviar(
+    EVENTOS.ESCOLHER_ACAO,
+    acaoTurnoUm,
+    { idComando },
+  );
+  await primeiro.receber(EVENTOS.ACAO_ACEITA);
+
+  const repeticao = await primeiro.enviar(
+    EVENTOS.ESCOLHER_ACAO,
+    acaoTurnoUm,
+    { idComando },
+  );
+  assert.equal(repeticao.codigo, 200);
+  assert.deepEqual(interpretarJson(repeticao).eventos, []);
+
+  segundo.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+    numeroTurno: 1,
+  });
+  await segundo.receber(EVENTOS.ACAO_ACEITA);
+  const [resultadoPrimeiro, resultadoSegundo] = await Promise.all([
+    primeiro.receber(EVENTOS.RESULTADO_TURNO),
+    segundo.receber(EVENTOS.RESULTADO_TURNO),
+  ]);
+  assert.equal(resultadoPrimeiro.dados.estado.numeroTurno, 2);
+  assert.deepEqual(resultadoPrimeiro, resultadoSegundo);
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, acaoTurnoUm);
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Essa ação não pertence ao turno atual.",
+  );
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+    numeroTurno: 3,
+  });
+  assert.equal(
+    (await primeiro.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Essa ação não pertence ao turno atual.",
+  );
+
+  const segundoTurno = await enviarAcoes(
+    primeiro,
+    { tipo: "golpe", indiceGolpe: 0 },
+    segundo,
+    { tipo: "golpe", indiceGolpe: 0 },
+  );
+  assert.equal(segundoTurno.dados.numeroTurno, 2);
+  assert.equal(segundoTurno.dados.estado.numeroTurno, 3);
+});
+
+test("o limite de requisições bloqueia clientes abusivos", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto);
+  const cliente = await conectarCliente(contexto, porta);
+  await cliente.receber(EVENTOS.CONEXAO);
+
+  let ultimaResposta;
+  for (let indice = 0; indice < 61; indice += 1) {
+    ultimaResposta = await cliente.enviar("evento_inexistente");
+  }
+
+  assert.equal(ultimaResposta.codigo, 429);
+  const eventos = interpretarJson(ultimaResposta).eventos;
+  assert.equal(
+    eventos.at(-1).dados.mensagem,
+    "Muitas mensagens foram enviadas em pouco tempo.",
+  );
+});
+
+test("uma partida continua após reconexão autenticada", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto, { prazoReconexao: 500 });
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  const preparada = await prepararBatalha(primeiro, segundo);
+
+  primeiro.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+  });
+  await primeiro.receber(EVENTOS.ACAO_ACEITA);
+  await primeiro.fechar();
+
+  const ausencia = await segundo.receber(EVENTOS.OPONENTE_DESCONECTADO);
+  assert.equal(ausencia.dados.temporario, true);
+  assert.equal(ausencia.dados.prazoMs, 500);
+
+  segundo.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+  });
+  assert.equal(
+    (await segundo.receber(EVENTOS.ERRO_SALA)).dados.mensagem,
+    "Aguardando a reconexão do adversário.",
+  );
+
+  const reconectado = await conectarCliente(contexto, porta);
+  await reconectado.receber(EVENTOS.CONEXAO);
+  reconectado.enviar(EVENTOS.REENTRAR_SALA, {
+    codigo: preparada.codigo,
+    jogadorId: preparada.conexaoPrimeiro.jogadorId,
+    tokenReconexao: preparada.conexaoPrimeiro.tokenReconexao,
+  });
+  const retomada = await reconectado.receber(EVENTOS.SALA_REENTRADA);
+  const retorno = await segundo.receber(EVENTOS.OPONENTE_RECONECTADO);
+
+  assert.equal(retomada.dados.jogadorId, preparada.conexaoPrimeiro.jogadorId);
+  assert.equal(retomada.dados.acaoPendente, true);
+  assert.notEqual(
+    retomada.dados.tokenReconexao,
+    preparada.conexaoPrimeiro.tokenReconexao,
+  );
+  assert.equal(retomada.dados.estado.situacao, "batalha");
+  assert.equal(retorno.dados.acaoPendente, false);
+  assert.deepEqual(retorno.dados.estado, retomada.dados.estado);
+
+  segundo.enviar(EVENTOS.ESCOLHER_ACAO, {
+    acao: { tipo: "golpe", indiceGolpe: 0 },
+  });
+  await segundo.receber(EVENTOS.ACAO_ACEITA);
+  const [resultadoReconectado, resultadoSegundo] = await Promise.all([
+    reconectado.receber(EVENTOS.RESULTADO_TURNO),
+    segundo.receber(EVENTOS.RESULTADO_TURNO),
+  ]);
+  assert.deepEqual(resultadoReconectado, resultadoSegundo);
+
+  reconectado.enviar(EVENTOS.SAIR_SALA);
+  const saida = await segundo.receber(EVENTOS.OPONENTE_DESCONECTADO);
+  assert.equal(saida.dados.temporario, false);
+});
+
+test("a retomada informa quando o adversário ainda está desconectado", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto, { prazoReconexao: 500 });
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  const preparada = await prepararBatalha(primeiro, segundo);
+
+  await primeiro.fechar();
+  await segundo.fechar();
+
+  const reconectado = await conectarCliente(contexto, porta);
+  await reconectado.receber(EVENTOS.CONEXAO);
+  reconectado.enviar(EVENTOS.REENTRAR_SALA, {
+    codigo: preparada.codigo,
+    jogadorId: preparada.conexaoPrimeiro.jogadorId,
+    tokenReconexao: preparada.conexaoPrimeiro.tokenReconexao,
+  });
+  const retomada = await reconectado.receber(EVENTOS.SALA_REENTRADA);
+  const jogadorAtual = obterJogadorNoEstado(
+    retomada.dados.estado,
+    preparada.conexaoPrimeiro.jogadorId,
+  );
+  const adversario = obterJogadorNoEstado(
+    retomada.dados.estado,
+    preparada.conexaoSegundo.jogadorId,
+  );
+
+  assert.equal(jogadorAtual.conectado, true);
+  assert.equal(adversario.conectado, false);
+});
+
+test("a reconexão durante a seleção não revela a equipe adversária", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto, { prazoReconexao: 500 });
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  await primeiro.receber(EVENTOS.CONEXAO);
+  const credenciaisSegundo = (await segundo.receber(EVENTOS.CONEXAO)).dados;
+
+  primeiro.enviar(EVENTOS.CRIAR_SALA);
+  const codigo = (await primeiro.receber(EVENTOS.SALA_CRIADA)).dados.codigo;
+  segundo.enviar(EVENTOS.ENTRAR_SALA, { codigo });
+  await Promise.all([
+    primeiro.receber(EVENTOS.SALA_ENTRADA),
+    segundo.receber(EVENTOS.SALA_ENTRADA),
+  ]);
+  primeiro.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.primeira,
+  });
+  await primeiro.receber(EVENTOS.ACAO_ACEITA);
+
+  await segundo.fechar();
+  await primeiro.receber(EVENTOS.OPONENTE_DESCONECTADO);
+  const reconectado = await conectarCliente(contexto, porta);
+  await reconectado.receber(EVENTOS.CONEXAO);
+  reconectado.enviar(EVENTOS.REENTRAR_SALA, {
+    codigo,
+    jogadorId: credenciaisSegundo.jogadorId,
+    tokenReconexao: credenciaisSegundo.tokenReconexao,
+  });
+
+  const retomada = await reconectado.receber(EVENTOS.SALA_REENTRADA);
+  const retorno = await primeiro.receber(EVENTOS.OPONENTE_RECONECTADO);
+  assert.equal(retomada.dados.equipeConfirmada, false);
+  assert.ok(
+    retomada.dados.estado.jogadores.every(
+      (jogador) => jogador.equipe.length === 0,
+    ),
+  );
+  assert.equal(retorno.dados.equipeConfirmada, true);
+  assert.deepEqual(
+    retorno.dados.estado.jogadores.map((jogador) => jogador.equipe.length),
+    [3, 0],
+  );
+
+  reconectado.enviar(EVENTOS.SELECIONAR_EQUIPE, {
+    lutadorIds: EQUIPES.segunda,
+  });
+  await reconectado.receber(EVENTOS.ACAO_ACEITA);
+  const [inicioPrimeiro, inicioReconectado] = await Promise.all([
+    primeiro.receber(EVENTOS.BATALHA_INICIADA),
+    reconectado.receber(EVENTOS.BATALHA_INICIADA),
+  ]);
+  assert.deepEqual(inicioPrimeiro, inicioReconectado);
+  assert.ok(
+    inicioPrimeiro.dados.estado.jogadores.every(
+      (jogador) => jogador.equipe.length === 3,
+    ),
+  );
+});
+
+test("a vaga é liberada quando o prazo de reconexão termina", async (contexto) => {
+  const { porta } = await iniciarAplicacao(contexto, {
+    prazoReconexao: 30,
+    tempoInatividadeSessao: 60,
+  });
+  const primeiro = await conectarCliente(contexto, porta);
+  const segundo = await conectarCliente(contexto, porta);
+  const conexaoSegundo = await segundo.receber(EVENTOS.CONEXAO);
+  await primeiro.receber(EVENTOS.CONEXAO);
+
+  primeiro.enviar(EVENTOS.CRIAR_SALA);
+  const codigo = (await primeiro.receber(EVENTOS.SALA_CRIADA)).dados.codigo;
+  segundo.enviar(EVENTOS.ENTRAR_SALA, { codigo });
+  await Promise.all([
+    primeiro.receber(EVENTOS.SALA_ENTRADA),
+    segundo.receber(EVENTOS.SALA_ENTRADA),
+  ]);
+  segundo.abandonar();
+  assert.equal(
+    (await primeiro.receber(EVENTOS.OPONENTE_DESCONECTADO)).dados.temporario,
+    true,
+  );
+  assert.equal(
+    (await primeiro.receber(EVENTOS.OPONENTE_DESCONECTADO)).dados.temporario,
+    false,
+  );
+
+  const terceiro = await conectarCliente(contexto, porta);
+  await terceiro.receber(EVENTOS.CONEXAO);
+  terceiro.enviar(EVENTOS.ENTRAR_SALA, { codigo });
+  await Promise.all([
+    primeiro.receber(EVENTOS.SALA_ENTRADA),
+    terceiro.receber(EVENTOS.SALA_ENTRADA),
+  ]);
+
+  const intruso = await conectarCliente(contexto, porta);
+  await intruso.receber(EVENTOS.CONEXAO);
+  intruso.enviar(EVENTOS.REENTRAR_SALA, {
+    codigo,
+    jogadorId: conexaoSegundo.dados.jogadorId,
+    tokenReconexao: conexaoSegundo.dados.tokenReconexao,
+  });
+  const erroRetomada = await intruso.receber(EVENTOS.ERRO_SALA);
+  assert.equal(
+    erroRetomada.dados.mensagem,
+    "Não foi possível retomar essa sessão.",
+  );
+  assert.equal(erroRetomada.dados.recuperavel, false);
 });

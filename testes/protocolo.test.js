@@ -13,3 +13,15 @@ test("o protocolo possui eventos únicos e serializáveis", () => {
     assert.match(evento, /^[a-z0-9_]+$/);
   }
 });
+
+test("o protocolo descreve equipes, ações tipadas e retomada de sessão", () => {
+  assert.equal(EVENTOS.VERSAO_PROTOCOLO, 4);
+  assert.equal(EVENTOS.SELECIONAR_EQUIPE, "selecionar_equipe");
+  assert.equal(EVENTOS.ESCOLHER_ACAO, "escolher_acao");
+  assert.equal(EVENTOS.REENTRAR_SALA, "reentrar_sala");
+  assert.equal(EVENTOS.SALA_REENTRADA, "sala_reentrada");
+  assert.equal(EVENTOS.OPONENTE_RECONECTADO, "oponente_reconectado");
+
+  assert.equal(EVENTOS.SELECIONAR_LUTADOR, undefined);
+  assert.equal(EVENTOS.ESCOLHER_GOLPE, undefined);
+});
