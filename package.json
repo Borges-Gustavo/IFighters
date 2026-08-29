@@ -2,12 +2,9 @@
   "name": "ifighters",
   "version": "1.0.0",
   "description": "Jogo web de batalhas por turnos entre IFighters, com modo local e multiplayer pela rede local.",
-  "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
-    "verificar": "node --check app.js && node --check data.js && node --check protocol.js && node --check regras-batalha.js && node --check server.js",
-    "test": "npm run verificar && node --test"
+    "dev": "node --watch server.js"
   },
   "repository": {
     "type": "git",
@@ -19,7 +16,6 @@
     "multiplayer",
     "rede-local"
   ],
-  "author": "",
   "license": "ISC",
   "type": "commonjs",
   "engines": {
